@@ -106,8 +106,15 @@ def main():
         print(f"Error: Dangerous output path detected: {resolved_output}")
         sys.exit(1)
 
-    if resolved_output.exists():
+    try:
+        # Atomically reserve the output path to prevent TOCTOU races
+        with resolved_output.open('x'):
+            pass
+    except FileExistsError:
         print(f"Error: Output file {resolved_output} already exists. Refusing to overwrite.")
+        sys.exit(1)
+    except OSError as e:
+        print(f"Error: Could not create output file {resolved_output}: {e}")
         sys.exit(1)
 
     try:
@@ -139,12 +146,14 @@ def main():
                         first = False
                 
                 tf.write('\n  ],\n')
-                tf.write('  "file_info": {\n')
-                tf.write(f'    "file_name": "{pcap_path.name}",\n')
-                tf.write(f'    "sha256": "{file_hash}",\n')
-                tf.write(f'    "total_packets_read": {total_packets},\n')
-                tf.write(f'    "ip_packets_extracted": {ip_count}\n')
-                tf.write('  }\n}')
+                tf.write('  "file_info": ')
+                json.dump({
+                    "file_name": pcap_path.name,
+                    "sha256": file_hash,
+                    "total_packets_read": total_packets,
+                    "ip_packets_extracted": ip_count
+                }, tf, indent=4)
+                tf.write('\n}')
                 tf.flush()
                 os.fsync(tf.fileno())
 
@@ -155,6 +164,9 @@ def main():
         except Exception as e:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
+            # If we fail, try to clean up the reserved file to allow re-runs
+            if resolved_output.exists() and resolved_output.stat().st_size == 0:
+                resolved_output.unlink()
             raise e
 
     except Exception as e:
