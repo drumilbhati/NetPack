@@ -1,177 +1,201 @@
-import json
+#!/usr/bin/env python3
+"""Ingest raw PCAP files, hash them, store in MinIO, and link to PostgreSQL."""
+
 import hashlib
 import os
 import sys
-import tempfile
+import uuid
 from pathlib import Path
-from scapy.all import PcapReader, IP, IPv6, TCP, UDP
+from typing import Optional
 
-def calculate_sha256(file_path):
-    """Calculate SHA-256 hash of a file."""
+import boto3
+import psycopg2
+from botocore.client import Config
+from psycopg2.extras import Json
+
+
+def calculate_sha256(file_path: Path) -> str:
+    """Calculate SHA256 hash of a file."""
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
-        # Read file in chunks to handle large PCAPs
         for byte_block in iter(lambda: f.read(4096), b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
-def is_pcap(file_path):
-    """Check for PCAP/PCAPNG magic numbers."""
-    magic_numbers = [
-        b'\xd4\xc3\xb2\xa1', b'\xa1\xb2\xc3\xd4', 
-        b'\x4d\x3c\xb2\xa1', b'\xa1\xb2\x3c\x4d',
-        b'\x0a\x0d\x0d\x0a'
-    ]
-    try:
-        with open(file_path, 'rb') as f:
-            header = f.read(4)
-            return header in magic_numbers
-    except OSError:
-        return False
 
-def is_safe_path(resolved_path):
-    """Validate resolved output path is within current working directory tree."""
-    try:
-        cwd = Path.cwd().resolve()
-        # Path must be a descendant of CWD or CWD itself
-        return cwd in resolved_path.parents or resolved_path == cwd
-    except Exception:
-        return False
+class EvidenceIngestor:
+    def __init__(self):
+        self.db_url = os.environ.get("DATABASE_URL")
+        self.s3_endpoint = os.environ.get("S3_ENDPOINT")
+        self.s3_access_key = os.environ.get("S3_ACCESS_KEY")
+        self.s3_secret_key = os.environ.get("S3_SECRET_KEY")
+        self.bucket_name = os.environ.get("MINIO_EVIDENCE_BUCKET")
 
-def extract_metadata(pcap_path):
-    """Yield basic flow metadata from a PCAP file using streaming."""
-    total_count = 0
-    with PcapReader(str(pcap_path)) as reader:
-        for pkt in reader:
-            total_count += 1
-            entry = {
-                "timestamp": float(pkt.time),
-                "src_ip": None,
-                "dst_ip": None,
-                "src_port": None,
-                "dst_port": None,
-                "protocol": None,
-                "protocol_name": None,
-                "length": len(pkt)
-            }
+        missing = [
+            var
+            for var, val in {
+                "DATABASE_URL": self.db_url,
+                "S3_ENDPOINT": self.s3_endpoint,
+                "S3_ACCESS_KEY": self.s3_access_key,
+                "S3_SECRET_KEY": self.s3_secret_key,
+                "MINIO_EVIDENCE_BUCKET": self.bucket_name,
+            }.items()
+            if not val
+        ]
+        if missing:
+            raise RuntimeError(
+                f"Missing required environment variables: {', '.join(missing)}"
+            )
 
-            # IP Layer
-            if IP in pkt:
-                entry["src_ip"] = pkt[IP].src
-                entry["dst_ip"] = pkt[IP].dst
-                entry["protocol"] = pkt[IP].proto
-            elif IPv6 in pkt:
-                entry["src_ip"] = pkt[IPv6].src
-                entry["dst_ip"] = pkt[IPv6].dst
-                entry["protocol"] = pkt[IPv6].nh
+        self.s3_client = boto3.client(
+            "s3",
+            endpoint_url=self.s3_endpoint,
+            aws_access_key_id=self.s3_access_key,
+            aws_secret_access_key=self.s3_secret_key,
+            config=Config(signature_version="s3v4"),
+            region_name="us-east-1",
+        )
 
-            # Transport Layer
-            if TCP in pkt:
-                entry["src_port"] = pkt[TCP].sport
-                entry["dst_port"] = pkt[TCP].dport
-                entry["protocol_name"] = "TCP"
-            elif UDP in pkt:
-                entry["src_port"] = pkt[UDP].sport
-                entry["dst_port"] = pkt[UDP].dport
-                entry["protocol_name"] = "UDP"
-            
-            # If we found IP data, yield the entry and current total count
-            if entry["src_ip"]:
-                yield entry, total_count
-        
-        # Yield a final sentinel with the final count if needed
-        yield None, total_count
+    def ingest(
+        self, case_id: str, file_path: Path, uploaded_by: Optional[str] = None
+    ) -> str:
+        """
+        Ingest a PCAP file: hash, upload to MinIO, and register in DB.
+        Returns the evidence_id.
+        """
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python ingestor.py <pcap_file> [output_json]")
-        sys.exit(1)
+        # 1. Calculate metadata
+        sha256 = calculate_sha256(file_path)
+        byte_size = file_path.stat().st_size
+        filename = file_path.name
+        evidence_id = str(uuid.uuid4())
+        object_key = f"cases/{case_id}/{evidence_id}"
 
-    pcap_path = Path(sys.argv[1])
-    output_arg = sys.argv[2] if len(sys.argv) > 2 else "metadata.json"
-
-    # Resolve and validate output path
-    resolved_output = Path(output_arg).resolve()
-
-    # Validation
-    if not pcap_path.exists():
-        print(f"Error: File {pcap_path} not found.")
-        sys.exit(1)
-
-    if not is_pcap(pcap_path):
-        print(f"Error: {pcap_path} is not a valid PCAP/PCAPNG file.")
-        sys.exit(1)
-
-    if not is_safe_path(resolved_output):
-        print(f"Error: Dangerous output path detected: {resolved_output}")
-        sys.exit(1)
-
-    try:
-        # Atomically reserve the output path to prevent TOCTOU races
-        with resolved_output.open('x'):
-            pass
-    except FileExistsError:
-        print(f"Error: Output file {resolved_output} already exists. Refusing to overwrite.")
-        sys.exit(1)
-    except OSError as e:
-        print(f"Error: Could not create output file {resolved_output}: {e}")
-        sys.exit(1)
-
-    try:
-        print(f"Processing {pcap_path}...")
-        
-        # Calculate Hash inside try block
-        file_hash = calculate_sha256(pcap_path)
-        print(f"SHA-256: {file_hash}")
-
-        # Atomic streaming write to temporary file
-        temp_fd, temp_path = tempfile.mkstemp(dir=resolved_output.parent, text=True)
+        # 2. Connect to DB
+        conn = psycopg2.connect(self.db_url)
         try:
-            with os.fdopen(temp_fd, 'w') as tf:
-                tf.write('{\n  "flows": [\n')
-                
-                ip_count = 0
-                total_packets = 0
-                first = True
-                
-                # Stream metadata to disk to keep memory footprint minimal
-                for entry, count in extract_metadata(pcap_path):
-                    total_packets = count
-                    if entry:
-                        if not first:
-                            tf.write(',\n')
-                        tf.write('    ')
-                        json.dump(entry, tf)
-                        ip_count += 1
-                        first = False
-                
-                tf.write('\n  ],\n')
-                tf.write('  "file_info": ')
-                json.dump({
-                    "file_name": pcap_path.name,
-                    "sha256": file_hash,
-                    "total_packets_read": total_packets,
-                    "ip_packets_extracted": ip_count
-                }, tf, indent=4)
-                tf.write('\n}')
-                tf.flush()
-                os.fsync(tf.fileno())
+            with conn.cursor() as cur:
+                # Atomic registration: insert or fetch existing
+                cur.execute(
+                    """
+                    INSERT INTO evidence_files (id, case_id, original_filename, object_key, sha256, byte_size, uploaded_by, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'uploading')
+                    ON CONFLICT (case_id, sha256) DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        evidence_id,
+                        case_id,
+                        filename,
+                        object_key,
+                        sha256,
+                        byte_size,
+                        uploaded_by,
+                    ),
+                )
+                result = cur.fetchone()
+                if result:
+                    evidence_id = result[0]
+                else:
+                    # Duplicate found, retrieve existing evidence_id
+                    cur.execute(
+                        "SELECT id FROM evidence_files WHERE case_id = %s AND sha256 = %s",
+                        (case_id, sha256),
+                    )
+                    evidence_id = cur.fetchone()[0]
+                    print(
+                        f"Evidence already exists in case {case_id} with hash {sha256}"
+                    )
+                    return evidence_id
 
-            # Atomic move into final location
-            os.replace(temp_path, resolved_output)
-            print(f"Successfully extracted metadata to {resolved_output}")
+                # 3. Upload to MinIO
+                uploaded_to_s3 = False
+                try:
+                    self.s3_client.upload_file(
+                        str(file_path), self.bucket_name, object_key
+                    )
+                    uploaded_to_s3 = True
+
+                    # 4. Update status and record forensic events
+                    cur.execute(
+                        "UPDATE evidence_files SET status = 'registered' WHERE id = %s",
+                        (evidence_id,),
+                    )
+
+                    cur.execute(
+                        """
+                        INSERT INTO custody_events (case_id, evidence_id, actor_id, action, details)
+                        VALUES (%s, %s, %s, 'ingested', %s)
+                        """,
+                        (
+                            case_id,
+                            evidence_id,
+                            uploaded_by,
+                            Json({"filename": filename, "sha256": sha256}),
+                        ),
+                    )
+
+                    cur.execute(
+                        """
+                        INSERT INTO audit_events (actor_id, action, target_type, target_id, case_id, evidence_id, metadata)
+                        VALUES (%s, 'UPLOAD', 'evidence_file', %s, %s, %s, %s)
+                        """,
+                        (
+                            uploaded_by,
+                            evidence_id,
+                            case_id,
+                            evidence_id,
+                            Json({"sha256": sha256}),
+                        ),
+                    )
+
+                    conn.commit()
+                    print(f"Successfully ingested {filename} as {evidence_id}")
+                    return evidence_id
+
+                except Exception as upload_exc:
+                    if uploaded_to_s3:
+                        try:
+                            self.s3_client.delete_object(
+                                Bucket=self.bucket_name, Key=object_key
+                            )
+                        except Exception as delete_exc:
+                            print(
+                                f"Failed to cleanup orphaned object {object_key}: {delete_exc}",
+                                file=sys.stderr,
+                            )
+                    raise upload_exc
 
         except Exception as e:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            # If we fail, try to clean up the reserved file to allow re-runs
-            if resolved_output.exists() and resolved_output.stat().st_size == 0:
-                resolved_output.unlink()
+            conn.rollback()
             raise e
+        finally:
+            conn.close()
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Ingest a PCAP file into NetPack.")
+    parser.add_argument("case_id", help="Target Case UUID")
+    parser.add_argument("file_path", type=Path, help="Path to the PCAP file")
+    parser.add_argument("--user-id", help="Optional User UUID performing the upload")
+
+    args = parser.parse_args()
+
+    # Load .env if exists for local testing
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(__file__).parent.parent / "infra" / ".env")
+    except ImportError:
+        pass
+
+    ingestor = EvidenceIngestor()
+    try:
+        ingestor.ingest(args.case_id, args.file_path, args.user_id)
+    except Exception as exc:
+        print(f"Ingestion failed: {exc}", file=sys.stderr)
+        sys.exit(1)
