@@ -9,7 +9,7 @@ A centralized platform for capturing, analyzing, and visualizing network traffic
 - `data_processing/`: Core ingestion engine and Deep Packet Inspection (DPI) logic.
 - `ml_models/`: AI/ML logic for behavioral anomaly detection.
 - `infra/`: Docker configurations for Elasticsearch, PostgreSQL, Kafka, and MinIO.
-- `docs/`: Design documents and implementation plans.
+- Root-level Markdown files: problem statement, solution architecture, and implementation plan.
 
 ## Getting Started
 1. **Infrastructure:** Navigate to `infra/`, copy `.env.example` to `.env`, and run `docker compose up -d postgres minio minio-init elasticsearch`.

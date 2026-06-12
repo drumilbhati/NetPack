@@ -41,7 +41,7 @@ graph TD
 ### 3.2 Data Storage Strategy
 *   **PostgreSQL:** System of record for users, roles, cases, evidence records, evidence hashes, custody events, parser job status, report metadata, and audit logs.
 *   **Elasticsearch:** Search index for derived flow/session/protocol metadata. Every indexed document must include `case_id`, `evidence_id`, parser version, packet/time bounds, and source raw-file reference.
-*   **MinIO/S3:** Immutable-style object storage for original raw PCAP files and generated exports. Object keys are derived from `case_id` and `evidence_id`, not user-supplied filenames.
+*   **MinIO/S3:** Versioned object storage for original raw PCAP files and generated exports. This is not immutable/WORM storage unless object-lock and retention controls are explicitly enabled in infrastructure such as `infra/minio/create-buckets.sh`. Object keys are derived from `case_id` and `evidence_id`, not user-supplied filenames.
 *   **Consistency Model:** PostgreSQL is authoritative. If indexing or ML scoring fails, evidence remains registered with a failed/retryable processing state rather than becoming invisible.
 
 ### 3.3 Intelligence & Analytics Layer

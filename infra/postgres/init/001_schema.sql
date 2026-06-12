@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS evidence_files (
   uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   parsed_at TIMESTAMPTZ,
   failure_reason TEXT,
+  UNIQUE (case_id, id),
   UNIQUE (case_id, sha256)
 );
 
@@ -86,14 +87,19 @@ CREATE TABLE IF NOT EXISTS parser_jobs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_parser_jobs_one_active_per_evidence
+  ON parser_jobs(evidence_id)
+  WHERE status IN ('queued', 'running', 'retrying');
+
 CREATE TABLE IF NOT EXISTS custody_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   case_id UUID NOT NULL REFERENCES cases(id) ON DELETE RESTRICT,
-  evidence_id UUID REFERENCES evidence_files(id) ON DELETE RESTRICT,
+  evidence_id UUID,
   actor_id UUID REFERENCES users(id),
   action TEXT NOT NULL,
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  details JSONB NOT NULL DEFAULT '{}'::jsonb
+  details JSONB NOT NULL DEFAULT '{}'::jsonb,
+  FOREIGN KEY (case_id, evidence_id) REFERENCES evidence_files(case_id, id) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -104,17 +110,19 @@ CREATE TABLE IF NOT EXISTS audit_events (
   target_type TEXT NOT NULL,
   target_id UUID,
   case_id UUID REFERENCES cases(id) ON DELETE SET NULL,
-  evidence_id UUID REFERENCES evidence_files(id) ON DELETE SET NULL,
+  evidence_id UUID,
   request_id TEXT,
   request_ip INET,
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  CHECK (evidence_id IS NULL OR case_id IS NOT NULL),
+  FOREIGN KEY (case_id, evidence_id) REFERENCES evidence_files(case_id, id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS alerts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   case_id UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
-  evidence_id UUID NOT NULL REFERENCES evidence_files(id) ON DELETE CASCADE,
+  evidence_id UUID NOT NULL,
   source TEXT NOT NULL,
   rule_or_model_id TEXT NOT NULL,
   rule_or_model_version TEXT,
@@ -125,7 +133,8 @@ CREATE TABLE IF NOT EXISTS alerts (
   flow_reference JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (evidence_id, source, rule_or_model_id, flow_reference)
+  UNIQUE (evidence_id, source, rule_or_model_id, flow_reference),
+  FOREIGN KEY (case_id, evidence_id) REFERENCES evidence_files(case_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS reports (
@@ -140,6 +149,7 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_evidence_files_case_id ON evidence_files(case_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_files_case_id_id ON evidence_files(case_id, id);
 CREATE INDEX IF NOT EXISTS idx_evidence_files_sha256 ON evidence_files(sha256);
 CREATE INDEX IF NOT EXISTS idx_parser_jobs_status_run_after ON parser_jobs(status, run_after);
 CREATE INDEX IF NOT EXISTS idx_custody_events_case_evidence_time ON custody_events(case_id, evidence_id, occurred_at);

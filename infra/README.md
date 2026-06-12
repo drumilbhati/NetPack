@@ -24,6 +24,8 @@ docker compose --profile streaming up -d
 
 ## Local URLs
 
+Defaults only. Override these ports in `.env` with `POSTGRES_PORT`, `ELASTICSEARCH_PORT`, `MINIO_API_PORT`, and `MINIO_CONSOLE_PORT`.
+
 - PostgreSQL: `localhost:5432`
 - Elasticsearch: `http://localhost:9200`
 - MinIO API: `http://localhost:9000`
