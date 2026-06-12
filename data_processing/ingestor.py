@@ -4,12 +4,14 @@
 import hashlib
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Optional
 
 import boto3
 import psycopg2
 from botocore.client import Config
+from psycopg2.extras import Json
 
 
 def calculate_sha256(file_path: Path) -> str:
@@ -23,14 +25,27 @@ def calculate_sha256(file_path: Path) -> str:
 
 class EvidenceIngestor:
     def __init__(self):
-        self.db_url = os.getenv(
-            "DATABASE_URL",
-            "postgresql://netpack:netpack_dev_password@127.0.0.1:5432/netpack",
-        )
-        self.s3_endpoint = os.getenv("S3_ENDPOINT", "http://127.0.0.1:9000")
-        self.s3_access_key = os.getenv("S3_ACCESS_KEY", "netpack")
-        self.s3_secret_key = os.getenv("S3_SECRET_KEY", "netpack_dev_password")
-        self.bucket_name = os.getenv("MINIO_EVIDENCE_BUCKET", "evidence")
+        self.db_url = os.environ.get("DATABASE_URL")
+        self.s3_endpoint = os.environ.get("S3_ENDPOINT")
+        self.s3_access_key = os.environ.get("S3_ACCESS_KEY")
+        self.s3_secret_key = os.environ.get("S3_SECRET_KEY")
+        self.bucket_name = os.environ.get("MINIO_EVIDENCE_BUCKET")
+
+        missing = [
+            var
+            for var, val in {
+                "DATABASE_URL": self.db_url,
+                "S3_ENDPOINT": self.s3_endpoint,
+                "S3_ACCESS_KEY": self.s3_access_key,
+                "S3_SECRET_KEY": self.s3_secret_key,
+                "MINIO_EVIDENCE_BUCKET": self.bucket_name,
+            }.items()
+            if not val
+        ]
+        if missing:
+            raise RuntimeError(
+                f"Missing required environment variables: {', '.join(missing)}"
+            )
 
         self.s3_client = boto3.client(
             "s3",
@@ -38,7 +53,7 @@ class EvidenceIngestor:
             aws_access_key_id=self.s3_access_key,
             aws_secret_access_key=self.s3_secret_key,
             config=Config(signature_version="s3v4"),
-            region_name="us-east-1",  # MinIO requires a region, though it can be anything
+            region_name="us-east-1",
         )
 
     def ingest(
@@ -55,77 +70,104 @@ class EvidenceIngestor:
         sha256 = calculate_sha256(file_path)
         byte_size = file_path.stat().st_size
         filename = file_path.name
+        evidence_id = str(uuid.uuid4())
+        object_key = f"cases/{case_id}/{evidence_id}/{filename}"
 
         # 2. Connect to DB
         conn = psycopg2.connect(self.db_url)
         try:
             with conn.cursor() as cur:
-                # Check for duplicate in this case
+                # Atomic registration: insert or fetch existing
                 cur.execute(
-                    "SELECT id FROM evidence_files WHERE case_id = %s AND sha256 = %s",
-                    (case_id, sha256),
+                    """
+                    INSERT INTO evidence_files (id, case_id, original_filename, object_key, sha256, byte_size, uploaded_by, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'uploading')
+                    ON CONFLICT (case_id, sha256) DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        evidence_id,
+                        case_id,
+                        filename,
+                        object_key,
+                        sha256,
+                        byte_size,
+                        uploaded_by,
+                    ),
                 )
-                existing = cur.fetchone()
-                if existing:
+                result = cur.fetchone()
+                if result:
+                    evidence_id = result[0]
+                else:
+                    # Duplicate found, retrieve existing evidence_id
+                    cur.execute(
+                        "SELECT id FROM evidence_files WHERE case_id = %s AND sha256 = %s",
+                        (case_id, sha256),
+                    )
+                    evidence_id = cur.fetchone()[0]
                     print(
                         f"Evidence already exists in case {case_id} with hash {sha256}"
                     )
-                    return existing[0]
-
-                # Insert evidence record to get evidence_id
-                # Note: object_key is temporary until we have the ID
-                cur.execute(
-                    """
-                    INSERT INTO evidence_files (case_id, original_filename, object_key, sha256, byte_size, uploaded_by)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                    """,
-                    (case_id, filename, "PENDING", sha256, byte_size, uploaded_by),
-                )
-                evidence_id = cur.fetchone()[0]
+                    return evidence_id
 
                 # 3. Upload to MinIO
-                object_key = f"cases/{case_id}/{evidence_id}/{filename}"
-                self.s3_client.upload_file(str(file_path), self.bucket_name, object_key)
+                uploaded_to_s3 = False
+                try:
+                    self.s3_client.upload_file(
+                        str(file_path), self.bucket_name, object_key
+                    )
+                    uploaded_to_s3 = True
 
-                # 4. Update record with final object_key and status
-                cur.execute(
-                    "UPDATE evidence_files SET object_key = %s, status = 'registered' WHERE id = %s",
-                    (object_key, evidence_id),
-                )
+                    # 4. Update status and record forensic events
+                    cur.execute(
+                        "UPDATE evidence_files SET status = 'registered' WHERE id = %s",
+                        (evidence_id,),
+                    )
 
-                # 5. Record first custody event
-                cur.execute(
-                    """
-                    INSERT INTO custody_events (case_id, evidence_id, actor_id, action, details)
-                    VALUES (%s, %s, %s, 'ingested', %s)
-                    """,
-                    (
-                        case_id,
-                        evidence_id,
-                        uploaded_by,
-                        psycopg2.extras.Json({"filename": filename, "sha256": sha256}),
-                    ),
-                )
+                    cur.execute(
+                        """
+                        INSERT INTO custody_events (case_id, evidence_id, actor_id, action, details)
+                        VALUES (%s, %s, %s, 'ingested', %s)
+                        """,
+                        (
+                            case_id,
+                            evidence_id,
+                            uploaded_by,
+                            Json({"filename": filename, "sha256": sha256}),
+                        ),
+                    )
 
-                # 6. Record audit event
-                cur.execute(
-                    """
-                    INSERT INTO audit_events (actor_id, action, target_type, target_id, case_id, evidence_id, metadata)
-                    VALUES (%s, 'UPLOAD', 'evidence_file', %s, %s, %s, %s)
-                    """,
-                    (
-                        uploaded_by,
-                        evidence_id,
-                        case_id,
-                        evidence_id,
-                        psycopg2.extras.Json({"sha256": sha256}),
-                    ),
-                )
+                    cur.execute(
+                        """
+                        INSERT INTO audit_events (actor_id, action, target_type, target_id, case_id, evidence_id, metadata)
+                        VALUES (%s, 'UPLOAD', 'evidence_file', %s, %s, %s, %s)
+                        """,
+                        (
+                            uploaded_by,
+                            evidence_id,
+                            case_id,
+                            evidence_id,
+                            Json({"sha256": sha256}),
+                        ),
+                    )
 
-                conn.commit()
-                print(f"Successfully ingested {filename} as {evidence_id}")
-                return evidence_id
+                    conn.commit()
+                    print(f"Successfully ingested {filename} as {evidence_id}")
+                    return evidence_id
+
+                except Exception as upload_exc:
+                    if uploaded_to_s3:
+                        try:
+                            self.s3_client.delete_object(
+                                Bucket=self.bucket_name, Key=object_key
+                            )
+                        except Exception as delete_exc:
+                            print(
+                                f"Failed to cleanup orphaned object {object_key}: {delete_exc}",
+                                file=sys.stderr,
+                            )
+                    raise upload_exc
+
         except Exception as e:
             conn.rollback()
             raise e
@@ -135,8 +177,6 @@ class EvidenceIngestor:
 
 if __name__ == "__main__":
     import argparse
-
-    import psycopg2.extras  # For Json
 
     parser = argparse.ArgumentParser(description="Ingest a PCAP file into NetPack.")
     parser.add_argument("case_id", help="Target Case UUID")
