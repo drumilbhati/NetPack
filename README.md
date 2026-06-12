@@ -7,6 +7,7 @@ A centralized platform for capturing, analyzing, and visualizing network traffic
 - `backend/`: FastAPI application for case management, search, and reporting.
 - `frontend/`: React application (Vite/TS) for the investigator dashboard and visualizations.
 - `data_processing/`: Core ingestion engine and Deep Packet Inspection (DPI) logic.
+- `data_processing/index_metadata.py`: Indexes extracted JSON metadata into Elasticsearch.
 - `ml_models/`: AI/ML logic for behavioral anomaly detection.
 - `infra/`: Docker configurations for Elasticsearch, PostgreSQL, Kafka, and MinIO.
 - Root-level Markdown files: problem statement, solution architecture, and implementation plan.
