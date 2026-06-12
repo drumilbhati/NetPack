@@ -7,7 +7,7 @@ BEGIN
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'evidence_status') THEN
-    CREATE TYPE evidence_status AS ENUM ('registered', 'parsing', 'parsed', 'failed', 'retrying');
+    CREATE TYPE evidence_status AS ENUM ('uploading', 'registered', 'parsing', 'parsed', 'failed', 'retrying');
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'job_status') THEN

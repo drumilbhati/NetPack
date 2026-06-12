@@ -71,7 +71,7 @@ class EvidenceIngestor:
         byte_size = file_path.stat().st_size
         filename = file_path.name
         evidence_id = str(uuid.uuid4())
-        object_key = f"cases/{case_id}/{evidence_id}/{filename}"
+        object_key = f"cases/{case_id}/{evidence_id}"
 
         # 2. Connect to DB
         conn = psycopg2.connect(self.db_url)
