@@ -12,7 +12,7 @@ A centralized platform for capturing, analyzing, and visualizing network traffic
 - `docs/`: Design documents and implementation plans.
 
 ## Getting Started
-1. **Infrastructure:** Navigate to `infra/` and run `docker-compose up -d`.
+1. **Infrastructure:** Navigate to `infra/`, copy `.env.example` to `.env`, and run `docker compose up -d postgres minio minio-init elasticsearch`.
 2. **Backend:** Navigate to `backend/`, install requirements, and run `uvicorn app.main:app`.
 3. **Frontend:** Navigate to `frontend/`, run `npm install` and `npm run dev`.
 
