@@ -158,10 +158,8 @@ CREATE TABLE IF NOT EXISTS reports (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX IF NOT EXISTS idx_evidence_files_case_id ON evidence_files(case_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_files_case_id_id ON evidence_files(case_id, id);
 CREATE INDEX IF NOT EXISTS idx_evidence_files_sha256 ON evidence_files(sha256);
-CREATE INDEX IF NOT EXISTS idx_investigators_email ON investigators(email);
 CREATE INDEX IF NOT EXISTS idx_parser_jobs_status_run_after ON parser_jobs(status, run_after);
 CREATE INDEX IF NOT EXISTS idx_custody_events_case_evidence_time ON custody_events(case_id, evidence_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_case_time ON audit_events(case_id, occurred_at);

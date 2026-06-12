@@ -7,12 +7,20 @@ import argparse
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_INDEX = "netpack-flows"
+
+
+class ElasticsearchError(RuntimeError):
+    """Custom error for Elasticsearch requests with HTTP status code."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 INDEX_MAPPING = {
@@ -34,6 +42,12 @@ INDEX_MAPPING = {
 
 
 def request_json(method: str, url: str, body: Any | None = None) -> Any:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"Invalid URL scheme: {parsed.scheme}. Only http and https are allowed."
+        )
+
     data = None
     headers = {"Accept": "application/json"}
     if body is not None:
@@ -47,9 +61,11 @@ def request_json(method: str, url: str, body: Any | None = None) -> Any:
             return json.loads(raw.decode("utf-8")) if raw else {}
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"{method} {url} failed: {exc.code} {detail}") from exc
+        raise ElasticsearchError(
+            f"{method} {url} failed: {exc.code} {detail}", status=exc.code
+        ) from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"{method} {url} failed: {exc.reason}") from exc
+        raise ElasticsearchError(f"{method} {url} failed: {exc.reason}") from exc
 
 
 def read_metadata(path: Path) -> list[dict[str, Any]]:
@@ -96,16 +112,24 @@ def normalize_record(record: Any, context: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("each metadata record must be a JSON object")
 
     source_ip = first_present(record, "source_ip", "src_ip", "src", "ip_src")
-    destination_ip = first_present(record, "destination_ip", "dest_ip", "dst_ip", "dst", "ip_dst")
+    destination_ip = first_present(
+        record, "destination_ip", "dest_ip", "dst_ip", "dst", "ip_dst"
+    )
 
     normalized = {
         "case_id": record.get("case_id") or context.get("case_id"),
         "evidence_id": record.get("evidence_id") or context.get("evidence_id"),
-        "sha256": record.get("sha256") or record.get("pcap_sha256") or context.get("sha256"),
+        "sha256": record.get("sha256")
+        or record.get("pcap_sha256")
+        or context.get("sha256"),
         "source_ip": source_ip,
         "destination_ip": destination_ip,
-        "source_port": coerce_int(first_present(record, "source_port", "src_port", "sport")),
-        "destination_port": coerce_int(first_present(record, "destination_port", "dest_port", "dst_port", "dport")),
+        "source_port": coerce_int(
+            first_present(record, "source_port", "src_port", "sport")
+        ),
+        "destination_port": coerce_int(
+            first_present(record, "destination_port", "dest_port", "dst_port", "dport")
+        ),
         "protocol": first_present(record, "protocol", "proto"),
         "timestamp": first_present(record, "timestamp", "time", "ts"),
         "metadata": record,
@@ -131,11 +155,16 @@ def coerce_int(value: Any) -> int | None:
 def ensure_index(es_url: str, index: str) -> None:
     try:
         request_json("HEAD", f"{es_url}/{index}")
-    except RuntimeError:
-        request_json("PUT", f"{es_url}/{index}", INDEX_MAPPING)
+    except ElasticsearchError as exc:
+        if exc.status == 404:
+            request_json("PUT", f"{es_url}/{index}", INDEX_MAPPING)
+        else:
+            raise
 
 
-def bulk_index(es_url: str, index: str, records: list[dict[str, Any]]) -> dict[str, Any]:
+def bulk_index(
+    es_url: str, index: str, records: list[dict[str, Any]]
+) -> dict[str, Any]:
     lines: list[str] = []
     for record in records:
         lines.append(json.dumps({"index": {"_index": index}}))
@@ -148,11 +177,21 @@ def bulk_index(es_url: str, index: str, records: list[dict[str, Any]]) -> dict[s
         headers={"Content-Type": "application/x-ndjson", "Accept": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        result = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise ElasticsearchError(
+            f"POST {es_url}/_bulk failed: {exc.code} {detail}", status=exc.code
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise ElasticsearchError(f"POST {es_url}/_bulk failed: {exc.reason}") from exc
 
     if result.get("errors"):
-        raise RuntimeError(f"bulk index reported errors: {json.dumps(result, indent=2)}")
+        raise ElasticsearchError(
+            f"bulk index reported errors: {json.dumps(result, indent=2)}"
+        )
     return result
 
 
@@ -172,12 +211,28 @@ def query_ip(es_url: str, index: str, ip: str) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Index extracted packet metadata JSON into Elasticsearch.")
-    parser.add_argument("metadata_json", type=Path, help="JSON or NDJSON metadata file produced by ingestion.")
-    parser.add_argument("--es-url", default="http://127.0.0.1:9200", help="Elasticsearch URL.")
-    parser.add_argument("--index", default=DEFAULT_INDEX, help="Elasticsearch index name.")
-    parser.add_argument("--query-ip", help="Query this IP after indexing and print matching hit count.")
-    parser.add_argument("--dry-run", action="store_true", help="Parse and normalize records without contacting Elasticsearch.")
+    parser = argparse.ArgumentParser(
+        description="Index extracted packet metadata JSON into Elasticsearch."
+    )
+    parser.add_argument(
+        "metadata_json",
+        type=Path,
+        help="JSON or NDJSON metadata file produced by ingestion.",
+    )
+    parser.add_argument(
+        "--es-url", default="http://127.0.0.1:9200", help="Elasticsearch URL."
+    )
+    parser.add_argument(
+        "--index", default=DEFAULT_INDEX, help="Elasticsearch index name."
+    )
+    parser.add_argument(
+        "--query-ip", help="Query this IP after indexing and print matching hit count."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Parse and normalize records without contacting Elasticsearch.",
+    )
     return parser.parse_args()
 
 
@@ -189,13 +244,17 @@ def main() -> int:
         return 1
 
     if args.dry_run:
-        print(json.dumps({"records": len(records), "first_record": records[0]}, indent=2))
+        print(
+            json.dumps({"records": len(records), "first_record": records[0]}, indent=2)
+        )
         return 0
 
     es_url = args.es_url.rstrip("/")
     ensure_index(es_url, args.index)
     result = bulk_index(es_url, args.index, records)
-    print(f"Indexed {len(records)} records into {args.index}; took={result.get('took')}ms")
+    print(
+        f"Indexed {len(records)} records into {args.index}; took={result.get('took')}ms"
+    )
 
     if args.query_ip:
         response = query_ip(es_url, args.index, args.query_ip)
