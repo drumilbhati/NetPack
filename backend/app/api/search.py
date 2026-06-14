@@ -34,11 +34,11 @@ async def search(
         )
 
     if time_range:
-        parts = time_range.split(",")
-        if len(parts) > 2:
+        parts = [p.strip() for p in time_range.split(",")]
+        if len(parts) > 2 or not any(parts):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid 'time_range' format. Expected up to 2 comma-separated ISO timestamps."
+                detail="Invalid 'time_range' format. Expected up to 2 comma-separated ISO timestamps, and at least one must be non-empty."
             )
         start_time = parts[0] if parts[0] else None
         if len(parts) == 2:

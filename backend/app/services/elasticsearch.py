@@ -64,7 +64,10 @@ class ElasticsearchService:
             query["bool"]["must"].append({"range": {"timestamp": time_range}})
 
         if not query["bool"]["must"]:
-            query = {"match_all": {}}
+            raise HTTPException(
+                status_code=400,
+                detail="At least one search filter (IP, protocol, or time range) must be provided."
+            )
 
         body = {"query": query, "size": size, "from": from_}
 

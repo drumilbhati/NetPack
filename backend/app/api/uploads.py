@@ -1,10 +1,13 @@
 import uuid
+import logging
+import contextlib
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Define and resolve the upload directory
 UPLOAD_DIR = Path("uploads").resolve()
@@ -90,8 +93,8 @@ async def upload_pcap(file: UploadFile = File(...)):
         if file_path.exists():
             try:
                 file_path.unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"Failed to cleanup file {file_path}: {e}")
         raise HTTPException(
             status_code=413,
             detail="File size exceeds the maximum limit of 100 MB.",
@@ -100,8 +103,8 @@ async def upload_pcap(file: UploadFile = File(...)):
         if file_path.exists():
             try:
                 file_path.unlink()
-            except Exception:
-                pass
+            except Exception as e_cleanup:
+                logger.error(f"Failed to cleanup file {file_path}: {e_cleanup}")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while saving the uploaded file on the server.",
