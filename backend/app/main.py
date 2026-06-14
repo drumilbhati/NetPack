@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api import cases, uploads
+from app.api import cases, uploads, search
 
 app = FastAPI(
     title="NetPack API",
@@ -11,6 +11,7 @@ app = FastAPI(
 # Include routers
 app.include_router(cases.router, prefix="/cases", tags=["cases"])
 app.include_router(uploads.router, prefix="/upload", tags=["uploads"])
+app.include_router(search.router, prefix="/search", tags=["search"])
 
 
 @app.get("/")

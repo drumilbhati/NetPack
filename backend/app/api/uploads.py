@@ -88,14 +88,20 @@ async def upload_pcap(file: UploadFile = File(...)):
         await run_in_threadpool(save_file_sync, file.file, file_path)
     except SizeLimitExceeded:
         if file_path.exists():
-            file_path.unlink()
+            try:
+                file_path.unlink()
+            except Exception:
+                pass
         raise HTTPException(
             status_code=413,
             detail="File size exceeds the maximum limit of 100 MB.",
         ) from None
     except Exception as e:
         if file_path.exists():
-            file_path.unlink()
+            try:
+                file_path.unlink()
+            except Exception:
+                pass
         raise HTTPException(
             status_code=500,
             detail="An error occurred while saving the uploaded file on the server.",

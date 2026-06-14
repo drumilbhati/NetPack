@@ -104,7 +104,10 @@ class EvidenceIngestor:
                         "SELECT id FROM evidence_files WHERE case_id = %s AND sha256 = %s",
                         (case_id, sha256),
                     )
-                    evidence_id = cur.fetchone()[0]
+                    existing_result = cur.fetchone()
+                    if not existing_result:
+                        raise RuntimeError(f"Race condition: Evidence {sha256} deleted before retrieval.")
+                    evidence_id = existing_result[0]
                     print(
                         f"Evidence already exists in case {case_id} with hash {sha256}"
                     )
