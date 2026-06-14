@@ -54,8 +54,13 @@ class TestSearchIntegration(unittest.TestCase):
         ]
         
         with httpx.Client() as es_client:
-            # Ensure a clean state
-            es_client.delete(f"{cls.es_url}/{cls.index}")
+            # Ensure a clean state, ignoring 404 if index doesn't exist
+            try:
+                es_client.delete(f"{cls.es_url}/{cls.index}")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code != 404:
+                    raise
+            
             # Create index with mapping
             resp = es_client.put(f"{cls.es_url}/{cls.index}", json=mapping)
             resp.raise_for_status()
@@ -69,7 +74,13 @@ class TestSearchIntegration(unittest.TestCase):
         es_url = os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200").rstrip("/")
         index = "netpack-flows"
         with httpx.Client() as es_client:
-            es_client.delete(f"{es_url}/{index}")
+            try:
+                es_client.delete(f"{es_url}/{index}")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code != 404:
+                    raise
+            except Exception:
+                pass
 
     def test_search_real_ip(self):
         # From seeded data: 10.10.1.15
