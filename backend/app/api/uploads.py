@@ -27,8 +27,6 @@ MAX_UPLOAD_SIZE = 100 * 1024 * 1024
 class SizeLimitExceeded(Exception):
     """Exception raised when the uploaded file exceeds the allowed size."""
 
-    pass
-
 
 def save_file_sync(source_file, target_path: Path):
     """Synchronous helper function to write the file stream with size tracking."""
@@ -47,8 +45,14 @@ def save_file_sync(source_file, target_path: Path):
 
 @router.post("/")
 async def upload_pcap(file: UploadFile = File(...)):
-    # 1. Filename Extension Check
-    if not file.filename.endswith((".pcap", ".pcapng")):
+    # 1. Filename Guard and Case-Insensitive Extension Check
+    if not file.filename:
+        raise HTTPException(
+            status_code=400, detail="Invalid request. Filename is missing."
+        )
+
+    filename_lower = file.filename.lower()
+    if not filename_lower.endswith((".pcap", ".pcapng")):
         raise HTTPException(
             status_code=400, detail="Invalid file type. Only PCAP files are allowed."
         )
@@ -88,7 +92,7 @@ async def upload_pcap(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=413,
             detail="File size exceeds the maximum limit of 100 MB.",
-        )
+        ) from None
     except Exception as e:
         if file_path.exists():
             file_path.unlink()
@@ -97,4 +101,9 @@ async def upload_pcap(file: UploadFile = File(...)):
             detail="An error occurred while saving the uploaded file on the server.",
         ) from e
 
-    return {"filename": file.filename, "status": "uploaded", "path": str(file_path)}
+    # Return relative path component to preserve security and internal server structures
+    return {
+        "filename": file.filename,
+        "status": "uploaded",
+        "path": f"uploads/{unique_filename}",
+    }
