@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
+from fastapi import APIRouter
+
 from app.schemas.case import Case, CaseCreate
-from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ async def create_case(case_in: CaseCreate):
         id=case_id_counter,
         title=case_in.title,
         description=case_in.description,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     mock_cases.append(new_case)
     case_id_counter += 1

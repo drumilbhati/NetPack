@@ -1,13 +1,17 @@
-from pydantic import BaseModel, ConfigDict
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
+
 
 class CaseBase(BaseModel):
     title: str
     description: Optional[str] = None
 
+
 class CaseCreate(CaseBase):
     pass
+
 
 class Case(CaseBase):
     id: int
