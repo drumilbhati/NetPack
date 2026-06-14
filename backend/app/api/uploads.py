@@ -1,4 +1,3 @@
-import shutil
 import uuid
 from pathlib import Path
 
@@ -21,11 +20,29 @@ PCAP_MAGIC_NUMBERS = {
     b"\x0a\x0d\x0d\x0a",  # PCAPNG Section Header Block
 }
 
+# Maximum upload size: 100 MB
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024
+
+
+class SizeLimitExceeded(Exception):
+    """Exception raised when the uploaded file exceeds the allowed size."""
+
+    pass
+
 
 def save_file_sync(source_file, target_path: Path):
-    """Synchronous helper function to write the file stream."""
+    """Synchronous helper function to write the file stream with size tracking."""
+    bytes_written = 0
+    chunk_size = 1024 * 1024  # 1MB chunks
     with open(target_path, "wb") as buffer:
-        shutil.copyfileobj(source_file, buffer)
+        while True:
+            chunk = source_file.read(chunk_size)
+            if not chunk:
+                break
+            bytes_written += len(chunk)
+            if bytes_written > MAX_UPLOAD_SIZE:
+                raise SizeLimitExceeded()
+            buffer.write(chunk)
 
 
 @router.post("/")
@@ -41,7 +58,7 @@ async def upload_pcap(file: UploadFile = File(...)):
         header = await file.read(4)
         await file.seek(
             0
-        )  # Rewind pointer back to start so copyfileobj writes the whole file
+        )  # Rewind pointer back to start so chunk copying starts from the beginning
     except Exception:
         raise HTTPException(
             status_code=400, detail="Failed to read file header for validation."
@@ -65,10 +82,19 @@ async def upload_pcap(file: UploadFile = File(...)):
     # 4. Offload Blocking File Write to Thread Pool
     try:
         await run_in_threadpool(save_file_sync, file.file, file_path)
+    except SizeLimitExceeded:
+        if file_path.exists():
+            file_path.unlink()
+        raise HTTPException(
+            status_code=413,
+            detail="File size exceeds the maximum limit of 100 MB.",
+        )
     except Exception as e:
+        if file_path.exists():
+            file_path.unlink()
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to write uploaded file to disk: {str(e)}",
-        )
+            detail="An error occurred while saving the uploaded file on the server.",
+        ) from e
 
     return {"filename": file.filename, "status": "uploaded", "path": str(file_path)}
