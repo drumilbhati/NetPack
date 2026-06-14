@@ -1,0 +1,29 @@
+from fastapi import FastAPI
+
+from app.api import cases, uploads
+
+app = FastAPI(
+    title="NetPack API",
+    description="Backend API for NetPack Network Analysis Tool",
+    version="0.1.0",
+)
+
+# Include routers
+app.include_router(cases.router, prefix="/cases", tags=["cases"])
+app.include_router(uploads.router, prefix="/upload", tags=["uploads"])
+
+
+@app.get("/")
+async def root():
+    return {"message": "Welcome to NetPack API"}
+
+
+if __name__ == "__main__":
+    import os
+
+    import uvicorn
+
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8000"))
+
+    uvicorn.run(app, host=host, port=port)
