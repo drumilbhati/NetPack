@@ -11,9 +11,10 @@ from typing import Optional
 import boto3
 import psycopg2
 from botocore.client import Config
-from dpi_engine import extract_packet_metadata
-from index_metadata import index_records
 from psycopg2.extras import Json
+
+from .dpi_engine import extract_packet_metadata
+from .index_metadata import index_records
 
 
 def calculate_sha256(file_path: Path) -> str:
@@ -169,7 +170,7 @@ class EvidenceIngestor:
                         raw_records = extract_packet_metadata(file_path)
 
                         # Use the same normalization logic as index_metadata.py
-                        from index_metadata import normalize_record
+                        from .index_metadata import normalize_record
 
                         context = {
                             "case_id": case_id,

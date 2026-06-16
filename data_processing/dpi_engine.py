@@ -19,7 +19,9 @@ def extract_packet_metadata(pcap_path: Path) -> List[Dict[str, Any]]:
             continue
 
         res = {
-            "timestamp": datetime.datetime.fromtimestamp(float(pkt.time)).isoformat(),
+            "timestamp": datetime.datetime.fromtimestamp(
+                float(pkt.time), datetime.timezone.utc
+            ).isoformat(),
             "source_ip": pkt[IP].src,
             "destination_ip": pkt[IP].dst,
             "protocol": "IP",
@@ -53,12 +55,13 @@ def extract_packet_metadata(pcap_path: Path) -> List[Dict[str, Any]]:
             res["destination_port"] = pkt[UDP].dport
             res["protocol"] = "UDP"
 
-            if pkt.haslayer(DNSQR):
-                res["dns_query"] = (
+            if pkt.haslayer(DNSQR) and pkt.haslayer(DNS) and pkt[DNS].qr == 0:
+                qname = (
                     pkt[DNSQR].qname.decode(errors="replace")
                     if pkt[DNSQR].qname
                     else ""
                 )
+                res["dns_query"] = qname.lower().rstrip(".")
 
         results.append(res)
 
