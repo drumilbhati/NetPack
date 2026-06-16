@@ -1,11 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { fetchCases } from '../api/cases';
 import { type Case } from '../types';
+import { FileText } from 'lucide-react';
 
 const Cases: React.FC = () => {
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const handleDownloadReport = (caseId: string) => {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    window.open(`${baseUrl.replace(/\/$/, '')}/reports/${caseId}`, '_blank', 'noopener,noreferrer');
+  };
 
   useEffect(() => {
     fetchCases()
@@ -31,23 +37,34 @@ const Cases: React.FC = () => {
             <th>Title</th>
             <th>Description</th>
             <th>Created At</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {cases.length === 0 ? (
             <tr>
-              <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+              <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
                 No cases found.
               </td>
             </tr>
           ) : (
             cases.map((caseItem) => (
               <tr key={caseItem.id}>
-                <td>{caseItem.id}</td>
+                <td title={caseItem.id}>{caseItem.id.substring(0, 8)}...</td>
                 <td style={{ fontWeight: 500 }}>{caseItem.title}</td>
                 <td>{caseItem.description}</td>
                 <td style={{ color: 'var(--text-secondary)' }}>
                   {new Date(caseItem.created_at).toLocaleString()}
+                </td>
+                <td>
+                  <button 
+                    className="btn-primary" 
+                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                    onClick={() => handleDownloadReport(caseItem.id)}
+                  >
+                    <FileText size={14} />
+                    Report
+                  </button>
                 </td>
               </tr>
             ))
