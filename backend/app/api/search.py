@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.schemas.search import PacketMetadata
 from app.services.elasticsearch import ElasticsearchService
@@ -11,15 +11,23 @@ router = APIRouter()
 @router.get("/", response_model=List[PacketMetadata])
 async def search(
     source_ip: Optional[str] = Query(None, description="Filter by source IP address"),
-    destination_ip: Optional[str] = Query(None, description="Filter by destination IP address"),
-    protocol: Optional[str] = Query(None, description="Filter by protocol (e.g., TCP, UDP)"),
+    destination_ip: Optional[str] = Query(
+        None, description="Filter by destination IP address"
+    ),
+    protocol: Optional[str] = Query(
+        None, description="Filter by protocol (e.g., TCP, UDP)"
+    ),
+    user_agent: Optional[str] = Query(None, description="Filter by HTTP User-Agent"),
+    dns_query: Optional[str] = Query(None, description="Filter by DNS query domain"),
     time_range: Optional[str] = Query(
         None, description="Filter by time range (format: start_iso,end_iso)"
     ),
     start_time: Optional[str] = Query(
         None, description="Filter by start time (ISO format)"
     ),
-    end_time: Optional[str] = Query(None, description="Filter by end time (ISO format)"),
+    end_time: Optional[str] = Query(
+        None, description="Filter by end time (ISO format)"
+    ),
     size: int = Query(100, ge=1, le=10000, description="Number of results to return"),
     from_: int = Query(0, alias="from", ge=0, description="Offset for pagination"),
     es_service: ElasticsearchService = Depends(ElasticsearchService),
@@ -30,7 +38,7 @@ async def search(
     if time_range and (start_time or end_time):
         raise HTTPException(
             status_code=400,
-            detail="Cannot provide both 'time_range' and 'start_time'/'end_time' parameters."
+            detail="Cannot provide both 'time_range' and 'start_time'/'end_time' parameters.",
         )
 
     if time_range:
@@ -38,7 +46,7 @@ async def search(
         if len(parts) > 2 or not any(parts):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid 'time_range' format. Expected up to 2 comma-separated ISO timestamps, and at least one must be non-empty."
+                detail="Invalid 'time_range' format. Expected up to 2 comma-separated ISO timestamps, and at least one must be non-empty.",
             )
         start_time = parts[0] if parts[0] else None
         if len(parts) == 2:
@@ -50,6 +58,8 @@ async def search(
         protocol=protocol,
         start_time=start_time,
         end_time=end_time,
+        http_user_agent=user_agent,
+        dns_query=dns_query,
         size=size,
         from_=from_,
     )

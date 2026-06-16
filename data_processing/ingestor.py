@@ -11,6 +11,8 @@ from typing import Optional
 import boto3
 import psycopg2
 from botocore.client import Config
+from dpi_engine import extract_packet_metadata
+from index_metadata import index_records
 from psycopg2.extras import Json
 
 
@@ -30,6 +32,8 @@ class EvidenceIngestor:
         self.s3_access_key = os.environ.get("S3_ACCESS_KEY")
         self.s3_secret_key = os.environ.get("S3_SECRET_KEY")
         self.bucket_name = os.environ.get("MINIO_EVIDENCE_BUCKET")
+        self.es_url = os.environ.get("ELASTICSEARCH_URL", "http://127.0.0.1:9200")
+        self.es_index = os.environ.get("ELASTICSEARCH_INDEX", "netpack-flows")
 
         missing = [
             var
@@ -106,7 +110,9 @@ class EvidenceIngestor:
                     )
                     existing_result = cur.fetchone()
                     if not existing_result:
-                        raise RuntimeError(f"Race condition: Evidence {sha256} deleted before retrieval.")
+                        raise RuntimeError(
+                            f"Race condition: Evidence {sha256} deleted before retrieval."
+                        )
                     evidence_id = existing_result[0]
                     print(
                         f"Evidence already exists in case {case_id} with hash {sha256}"
@@ -156,6 +162,37 @@ class EvidenceIngestor:
 
                     conn.commit()
                     print(f"Successfully ingested {filename} as {evidence_id}")
+
+                    # 5. DPI and Indexing
+                    try:
+                        print(f"Running DPI for {filename}...")
+                        raw_records = extract_packet_metadata(file_path)
+
+                        # Use the same normalization logic as index_metadata.py
+                        from index_metadata import normalize_record
+
+                        context = {
+                            "case_id": case_id,
+                            "evidence_id": evidence_id,
+                            "sha256": sha256,
+                        }
+                        records = [
+                            normalize_record(rec, context) for rec in raw_records
+                        ]
+
+                        if records:
+                            print(
+                                f"Indexing {len(records)} packets into Elasticsearch..."
+                            )
+                            index_records(records, self.es_url, self.es_index)
+                            print(f"Successfully indexed metadata for {filename}")
+                        else:
+                            print(f"No packets found in {filename} to index.")
+                    except Exception as e:
+                        print(
+                            f"DPI/Indexing failed for {filename}: {e}", file=sys.stderr
+                        )
+
                     return evidence_id
 
                 except Exception as upload_exc:

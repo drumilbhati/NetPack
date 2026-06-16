@@ -19,9 +19,7 @@ class ElasticsearchService:
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.request(
-                    method, url, json=body, headers=headers
-                )
+                response = await client.request(method, url, json=body, headers=headers)
                 response.raise_for_status()
                 return response.json() if response.content else {}
         except httpx.HTTPStatusError as exc:
@@ -43,6 +41,8 @@ class ElasticsearchService:
         protocol: Optional[str] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
+        http_user_agent: Optional[str] = None,
+        dns_query: Optional[str] = None,
         size: int = 100,
         from_: int = 0,
     ) -> List[Dict[str, Any]]:
@@ -54,6 +54,10 @@ class ElasticsearchService:
             query["bool"]["must"].append({"term": {"destination_ip": destination_ip}})
         if protocol:
             query["bool"]["must"].append({"term": {"protocol": protocol}})
+        if http_user_agent:
+            query["bool"]["must"].append({"term": {"http_user_agent": http_user_agent}})
+        if dns_query:
+            query["bool"]["must"].append({"term": {"dns_query": dns_query}})
 
         if start_time or end_time:
             time_range = {}
@@ -66,7 +70,7 @@ class ElasticsearchService:
         if not query["bool"]["must"]:
             raise HTTPException(
                 status_code=400,
-                detail="At least one search filter (IP, protocol, or time range) must be provided."
+                detail="At least one search filter (IP, protocol, User-Agent, DNS, or time range) must be provided.",
             )
 
         body = {"query": query, "size": size, "from": from_}
