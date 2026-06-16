@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, Search } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Search, Share2 } from 'lucide-react';
 
 const Layout: React.FC = () => {
   const location = useLocation();
@@ -9,6 +9,7 @@ const Layout: React.FC = () => {
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Case Management', href: '/cases', icon: Briefcase },
     { name: 'Search', href: '/search', icon: Search },
+    { name: 'Network Graph', href: '/graph', icon: Share2 },
   ];
 
   return (
