@@ -3,7 +3,6 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Cases from './pages/Cases';
 import Search from './pages/Search';
-import './App.css';
 
 function App() {
   return (

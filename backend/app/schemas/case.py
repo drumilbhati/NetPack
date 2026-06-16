@@ -14,7 +14,7 @@ class CaseCreate(CaseBase):
 
 
 class Case(CaseBase):
-    id: int
+    id: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

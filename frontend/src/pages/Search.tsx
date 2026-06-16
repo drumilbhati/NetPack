@@ -9,6 +9,7 @@ const Search: React.FC = () => {
           type="text"
           placeholder="Search by IP, Protocol, or Keyword..."
           className="search-input"
+          aria-label="Search by IP, Protocol, or Keyword"
         />
         <button className="btn-primary">
           Search

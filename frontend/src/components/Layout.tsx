@@ -39,7 +39,7 @@ const Layout: React.FC = () => {
       <div className="main-content">
         <header className="top-bar">
           <h2>
-            {navigation.find((n) => n.href === location.pathname)?.name || 'NetPack'}
+            {navigation.find((n) => n.href === location.pathname.replace(/\/$/, '') || n.href === location.pathname)?.name || 'NetPack'}
           </h2>
         </header>
         <main className="content-area">
