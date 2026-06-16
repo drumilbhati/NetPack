@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import cases, uploads, search, graph
+from app.api import cases, uploads, search, graph, reports
 
 app = FastAPI(
     title="NetPack API",
@@ -23,6 +23,7 @@ app.include_router(cases.router, prefix="/cases", tags=["cases"])
 app.include_router(uploads.router, prefix="/upload", tags=["uploads"])
 app.include_router(search.router, prefix="/search", tags=["search"])
 app.include_router(graph.router, prefix="/graph", tags=["graph"])
+app.include_router(reports.router, prefix="/reports", tags=["reports"])
 
 
 @app.get("/")
