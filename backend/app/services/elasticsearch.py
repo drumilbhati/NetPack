@@ -98,3 +98,66 @@ class ElasticsearchService:
             return [hit["_source"] for hit in hits]
         except Exception:
             return []
+
+    async def get_throughput_stats(self, interval: str = "1m") -> List[Dict[str, Any]]:
+        body = {
+            "size": 0,
+            "aggs": {
+                "throughput": {
+                    "date_histogram": {
+                        "field": "timestamp",
+                        "fixed_interval": interval,
+                    },
+                    "aggs": {
+                        "bytes_sent": {"sum": {"field": "bytes_sent"}},
+                        "bytes_received": {"sum": {"field": "bytes_received"}},
+                    },
+                }
+            },
+        }
+        try:
+            response = await self._request_json("POST", f"{INDEX_NAME}/_search", body)
+            buckets = (
+                response.get("aggregations", {})
+                .get("throughput", {})
+                .get("buckets", [])
+            )
+            return buckets
+        except Exception:
+            return []
+
+    async def get_protocol_stats(self) -> List[Dict[str, Any]]:
+        body = {"size": 0, "aggs": {"protocols": {"terms": {"field": "protocol"}}}}
+        try:
+            response = await self._request_json("POST", f"{INDEX_NAME}/_search", body)
+            buckets = (
+                response.get("aggregations", {}).get("protocols", {}).get("buckets", [])
+            )
+            return buckets
+        except Exception:
+            return []
+
+    async def get_top_talkers(self, size: int = 10) -> List[Dict[str, Any]]:
+        body = {
+            "size": 0,
+            "aggs": {
+                "top_talkers": {
+                    "terms": {
+                        "field": "source_ip",
+                        "size": size,
+                        "order": {"total_bytes": "desc"},
+                    },
+                    "aggs": {"total_bytes": {"sum": {"field": "bytes_sent"}}},
+                }
+            },
+        }
+        try:
+            response = await self._request_json("POST", f"{INDEX_NAME}/_search", body)
+            buckets = (
+                response.get("aggregations", {})
+                .get("top_talkers", {})
+                .get("buckets", [])
+            )
+            return buckets
+        except Exception:
+            return []
