@@ -15,6 +15,7 @@ from psycopg2.extras import Json
 
 from .dpi_engine import extract_flow_metadata, extract_packet_metadata
 from .index_metadata import index_records
+from .threat_detection_service import ThreatDetectionService
 
 # Anomaly Detection Integration
 MODEL_PATH = os.path.join(
@@ -88,6 +89,9 @@ class EvidenceIngestor:
             aws_secret_access_key=self.s3_secret_key,
             config=Config(signature_version="s3v4"),
             region_name="us-east-1",
+        )
+        self.threat_service = ThreatDetectionService(
+            db_url=self.db_url, model_path=MODEL_PATH
         )
 
     def ingest(
@@ -244,6 +248,15 @@ class EvidenceIngestor:
                             print(
                                 f"Successfully indexed metadata and anomalies for {filename}"
                             )
+
+                            # 3. Process and Store Alerts
+                            try:
+                                self.threat_service.process_evidence(
+                                    case_id, evidence_id, p_records, f_records
+                                )
+                            except Exception as alert_exc:
+                                print(f"Warning: Alert generation failed: {alert_exc}")
+
                         else:
                             print(f"No packets or flows found in {filename} to index.")
                     except Exception as e:

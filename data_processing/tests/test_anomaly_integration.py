@@ -157,6 +157,23 @@ class TestAnomalyIntegration(unittest.TestCase):
         )
         self.assertEqual(response_normal["hits"]["total"]["value"], 0)
 
+        # Verify alerts in PostgreSQL
+        conn = psycopg2.connect(self.db_url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT source, rule_or_model_id FROM alerts WHERE evidence_id = %s",
+                    (evidence_id,),
+                )
+                alerts = cur.fetchall()
+                print(f"Found {len(alerts)} alerts in DB: {alerts}")
+
+                # Should have at least one ML alert for the anomaly
+                sources = [a[0] for a in alerts]
+                self.assertIn("ML", sources)
+        finally:
+            conn.close()
+
     def tearDown(self):
         if self.pcap_path.exists():
             self.pcap_path.unlink()

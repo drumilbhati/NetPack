@@ -33,8 +33,7 @@ class TestDPIEngine(unittest.TestCase):
         # Verify UTC timestamp (2021-06-16T12:13:20+00:00)
         self.assertTrue(res["timestamp"].endswith("+00:00"))
 
-    @patch("data_processing.dpi_engine.rdpcap")
-    def test_extract_packet_metadata_dns_query(self, mock_rdpcap):
+    def test_extract_packet_metadata_dns_query(self):
         # Create a mock DNS query packet (qr=0)
         pkt = (
             Ether()
@@ -44,9 +43,7 @@ class TestDPIEngine(unittest.TestCase):
         )
         pkt.time = 1623845600.0
 
-        mock_rdpcap.return_value = [pkt]
-
-        results = extract_packet_metadata(Path("dummy.pcap"))
+        results = extract_packet_metadata([pkt])
 
         self.assertEqual(len(results), 1)
         res = results[0]
