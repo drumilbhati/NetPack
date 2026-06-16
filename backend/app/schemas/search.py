@@ -14,4 +14,7 @@ class PacketMetadata(BaseModel):
     destination_port: Optional[int] = None
     protocol: Optional[str] = None
     timestamp: Optional[datetime] = None
+    http_url: Optional[str] = None
+    http_user_agent: Optional[str] = None
+    dns_query: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)

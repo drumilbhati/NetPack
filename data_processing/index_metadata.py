@@ -35,6 +35,9 @@ INDEX_MAPPING = {
             "destination_port": {"type": "integer"},
             "protocol": {"type": "keyword"},
             "timestamp": {"type": "date", "ignore_malformed": True},
+            "http_url": {"type": "keyword"},
+            "http_user_agent": {"type": "keyword"},
+            "dns_query": {"type": "keyword"},
             "metadata": {"type": "object", "enabled": True},
         }
     }
@@ -132,6 +135,9 @@ def normalize_record(record: Any, context: dict[str, Any]) -> dict[str, Any]:
         ),
         "protocol": first_present(record, "protocol", "proto"),
         "timestamp": first_present(record, "timestamp", "time", "ts"),
+        "http_url": record.get("http_url"),
+        "http_user_agent": record.get("http_user_agent"),
+        "dns_query": record.get("dns_query"),
         "metadata": record,
     }
 
@@ -236,6 +242,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def index_records(
+    records: list[dict[str, Any]], es_url: str, index: str = DEFAULT_INDEX
+) -> dict[str, Any]:
+    """Helper to ensure index exists and bulk index records."""
+    es_url = es_url.rstrip("/")
+    ensure_index(es_url, index)
+    return bulk_index(es_url, index, records)
+
+
 def main() -> int:
     args = parse_args()
     records = read_metadata(args.metadata_json)
@@ -249,14 +264,13 @@ def main() -> int:
         )
         return 0
 
-    es_url = args.es_url.rstrip("/")
-    ensure_index(es_url, args.index)
-    result = bulk_index(es_url, args.index, records)
+    result = index_records(records, args.es_url, args.index)
     print(
         f"Indexed {len(records)} records into {args.index}; took={result.get('took')}ms"
     )
 
     if args.query_ip:
+        es_url = args.es_url.rstrip("/")
         response = query_ip(es_url, args.index, args.query_ip)
         total = response.get("hits", {}).get("total", {})
         count = total.get("value", total) if isinstance(total, dict) else total
