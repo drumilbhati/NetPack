@@ -13,8 +13,37 @@ import psycopg2
 from botocore.client import Config
 from psycopg2.extras import Json
 
-from .dpi_engine import extract_packet_metadata
+from .dpi_engine import extract_flow_metadata, extract_packet_metadata
 from .index_metadata import index_records
+
+# Anomaly Detection Integration
+MODEL_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "ml_models",
+    "saved_models",
+    "anomaly_detector.joblib",
+)
+
+try:
+    import pandas as pd
+
+    from ml_models.anomaly_detector import AnomalyDetector
+
+    ANOMALY_DETECTOR = AnomalyDetector()
+    if os.path.exists(MODEL_PATH):
+        try:
+            ANOMALY_DETECTOR.load(MODEL_PATH)
+            ML_READY = True
+        except Exception as e:
+            ML_READY = False
+            print(f"Warning: Failed to load anomaly model from {MODEL_PATH}: {e}")
+    else:
+        ML_READY = False
+        print(f"Warning: Anomaly model not found at {MODEL_PATH}")
+except ImportError:
+    ML_READY = False
+    print("Warning: ML libraries not available for anomaly detection")
 
 
 def calculate_sha256(file_path: Path) -> str:
@@ -166,8 +195,15 @@ class EvidenceIngestor:
 
                     # 5. DPI and Indexing
                     try:
-                        print(f"Running DPI for {filename}...")
-                        raw_records = extract_packet_metadata(file_path)
+                        print(f"Running DPI and Anomaly Detection for {filename}...")
+
+                        from scapy.all import rdpcap
+
+                        packets = rdpcap(str(file_path))
+
+                        # Extract both packets (for protocol details) and flows (for ML)
+                        packet_records = extract_packet_metadata(packets)
+                        flow_records = extract_flow_metadata(packets)
 
                         # Use the same normalization logic as index_metadata.py
                         from .index_metadata import normalize_record
@@ -177,22 +213,47 @@ class EvidenceIngestor:
                             "evidence_id": evidence_id,
                             "sha256": sha256,
                         }
-                        records = [
-                            normalize_record(rec, context) for rec in raw_records
+
+                        # 1. Process Packets (DPI)
+                        p_records = [
+                            normalize_record(rec, context) for rec in packet_records
                         ]
 
-                        if records:
+                        # 2. Process Flows and Score Anomalies
+                        if ML_READY and flow_records:
+                            df = pd.DataFrame(flow_records)
+                            # Predict anomalies
+                            scores = ANOMALY_DETECTOR.score(df)
+                            preds = ANOMALY_DETECTOR.predict(df)
+
+                            for i, rec in enumerate(flow_records):
+                                rec["anomaly_score"] = float(scores[i])
+                                rec["is_anomaly"] = bool(preds[i] == -1)
+
+                        f_records = [
+                            normalize_record(rec, context) for rec in flow_records
+                        ]
+
+                        all_records = p_records + f_records
+
+                        if all_records:
                             print(
-                                f"Indexing {len(records)} packets into Elasticsearch..."
+                                f"Indexing {len(all_records)} records into Elasticsearch..."
                             )
-                            index_records(records, self.es_url, self.es_index)
-                            print(f"Successfully indexed metadata for {filename}")
+                            index_records(all_records, self.es_url, self.es_index)
+                            print(
+                                f"Successfully indexed metadata and anomalies for {filename}"
+                            )
                         else:
-                            print(f"No packets found in {filename} to index.")
+                            print(f"No packets or flows found in {filename} to index.")
                     except Exception as e:
                         print(
-                            f"DPI/Indexing failed for {filename}: {e}", file=sys.stderr
+                            f"DPI/Indexing/ML failed for {filename}: {e}",
+                            file=sys.stderr,
                         )
+                        import traceback
+
+                        traceback.print_exc()
 
                     return evidence_id
 

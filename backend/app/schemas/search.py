@@ -17,4 +17,10 @@ class PacketMetadata(BaseModel):
     http_url: Optional[str] = None
     http_user_agent: Optional[str] = None
     dns_query: Optional[str] = None
+    bytes_sent: Optional[int] = None
+    bytes_received: Optional[int] = None
+    duration: Optional[float] = None
+    packet_count: Optional[int] = None
+    anomaly_score: Optional[float] = None
+    is_anomaly: Optional[bool] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)

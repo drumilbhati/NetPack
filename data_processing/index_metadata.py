@@ -38,6 +38,12 @@ INDEX_MAPPING = {
             "http_url": {"type": "keyword"},
             "http_user_agent": {"type": "keyword"},
             "dns_query": {"type": "keyword"},
+            "bytes_sent": {"type": "long"},
+            "bytes_received": {"type": "long"},
+            "duration": {"type": "float"},
+            "packet_count": {"type": "integer"},
+            "anomaly_score": {"type": "float"},
+            "is_anomaly": {"type": "boolean"},
             "metadata": {"type": "object", "enabled": True},
         }
     }
@@ -138,6 +144,12 @@ def normalize_record(record: Any, context: dict[str, Any]) -> dict[str, Any]:
         "http_url": record.get("http_url"),
         "http_user_agent": record.get("http_user_agent"),
         "dns_query": record.get("dns_query"),
+        "bytes_sent": record.get("bytes_sent"),
+        "bytes_received": record.get("bytes_received"),
+        "duration": record.get("duration"),
+        "packet_count": record.get("packet_count"),
+        "anomaly_score": record.get("anomaly_score"),
+        "is_anomaly": record.get("is_anomaly"),
         "metadata": record,
     }
 
