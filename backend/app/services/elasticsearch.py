@@ -78,3 +78,23 @@ class ElasticsearchService:
         response = await self._request_json("POST", f"{INDEX_NAME}/_search", body)
         hits = response.get("hits", {}).get("hits", [])
         return [hit["_source"] for hit in hits]
+
+    async def get_recent_sessions(
+        self, case_id: Optional[str] = None, size: int = 50
+    ) -> List[Dict[str, Any]]:
+        query = {"match_all": {}}
+        if case_id:
+            query = {"term": {"case_id": case_id}}
+
+        body = {
+            "query": query,
+            "sort": [{"timestamp": {"order": "desc"}}],
+            "size": size,
+        }
+
+        try:
+            response = await self._request_json("POST", f"{INDEX_NAME}/_search", body)
+            hits = response.get("hits", {}).get("hits", [])
+            return [hit["_source"] for hit in hits]
+        except Exception:
+            return []
