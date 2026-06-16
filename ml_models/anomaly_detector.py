@@ -43,6 +43,11 @@ class AnomalyDetector:
         if not self.is_trained:
             raise ValueError("Model is not trained.")
 
+        # Ensure all required features are present
+        missing = [f for f in self.features if f not in df.columns]
+        if missing:
+            raise ValueError(f"Missing features in input data: {missing}")
+
         X = df[self.features]
         return self.model.predict(X)
 
@@ -53,6 +58,11 @@ class AnomalyDetector:
         if not self.is_trained:
             raise ValueError("Model is not trained.")
 
+        # Ensure all required features are present
+        missing = [f for f in self.features if f not in df.columns]
+        if missing:
+            raise ValueError(f"Missing features in input data: {missing}")
+
         X = df[self.features]
         return self.model.decision_function(X)
 
@@ -61,7 +71,9 @@ class AnomalyDetector:
         if not self.is_trained:
             raise ValueError("Cannot save an untrained model.")
 
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        dirname = os.path.dirname(path)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
         joblib.dump({"model": self.model, "features": self.features}, path)
 
     def load(self, path: str):

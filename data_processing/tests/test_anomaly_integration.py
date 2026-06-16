@@ -9,7 +9,16 @@ import psycopg2
 from scapy.all import IP, TCP, UDP, Ether, wrpcap
 
 # Add root to sys.path
-sys.path.append(str(Path(__file__).resolve().parents[2]))
+root_dir = Path(__file__).resolve().parents[2]
+sys.path.append(str(root_dir))
+
+# Load environment variables from infra/.env if it exists
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(root_dir / "infra" / ".env")
+except ImportError:
+    pass
 
 from data_processing.index_metadata import request_json
 from data_processing.ingestor import EvidenceIngestor
@@ -93,6 +102,11 @@ class TestAnomalyIntegration(unittest.TestCase):
         print(f"Generated {self.pcap_path}")
 
     def test_ingestion_and_anomaly_detection(self):
+        from data_processing.ingestor import ML_READY
+
+        if not ML_READY:
+            self.skipTest("ML model or dependencies not available")
+
         evidence_id = self.ingestor.ingest(
             case_id=self.case_id, file_path=self.pcap_path, uploaded_by=self.user_id
         )
@@ -146,6 +160,25 @@ class TestAnomalyIntegration(unittest.TestCase):
     def tearDown(self):
         if self.pcap_path.exists():
             self.pcap_path.unlink()
+
+        # Cleanup DB records
+        if hasattr(self, "case_id"):
+            conn = psycopg2.connect(self.db_url)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM custody_events WHERE case_id = %s", (self.case_id,)
+                    )
+                    cur.execute(
+                        "DELETE FROM audit_events WHERE case_id = %s", (self.case_id,)
+                    )
+                    cur.execute(
+                        "DELETE FROM evidence_files WHERE case_id = %s", (self.case_id,)
+                    )
+                    cur.execute("DELETE FROM cases WHERE id = %s", (self.case_id,))
+                conn.commit()
+            finally:
+                conn.close()
 
 
 if __name__ == "__main__":

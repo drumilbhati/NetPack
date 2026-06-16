@@ -11,12 +11,15 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from ml_models.anomaly_detector import AnomalyDetector
 
 
-def generate_synthetic_data(n_samples: int = 1000, anomaly_ratio: float = 0.05):
+def generate_synthetic_data(
+    n_samples: int = 1000, anomaly_ratio: float = 0.05, seed: int = 42
+):
     """
     Generate synthetic network flow data.
     Normal: Low to medium bytes, short duration.
     Anomalous: Very high bytes or very long duration.
     """
+    np.random.seed(seed)
     n_anomalies = int(n_samples * anomaly_ratio)
     n_normal = n_samples - n_anomalies
 

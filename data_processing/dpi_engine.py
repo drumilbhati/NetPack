@@ -6,16 +6,15 @@ from scapy.all import DNS, DNSQR, IP, TCP, UDP, rdpcap
 from scapy.layers.http import HTTPRequest
 
 
-def extract_packet_metadata(pcap_path: Path) -> List[Dict[str, Any]]:
+def extract_packet_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
     """
-    Extract metadata from a PCAP file using Scapy.
+    Extract metadata from Scapy packets.
     Decodes HTTP requests (URL, User-Agent) and DNS queries.
     """
-    packets = rdpcap(str(pcap_path))
     results = []
 
     for pkt in packets:
-        if not IP in pkt:
+        if IP not in pkt:
             continue
 
         res = {
@@ -69,16 +68,15 @@ def extract_packet_metadata(pcap_path: Path) -> List[Dict[str, Any]]:
     return results
 
 
-def extract_flow_metadata(pcap_path: Path) -> List[Dict[str, Any]]:
+def extract_flow_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
     """
-    Extract flow-level metadata from a PCAP file.
+    Extract flow-level metadata from Scapy packets.
     Aggregates packets into flows based on (src_ip, dst_ip, src_port, dst_port, protocol).
     """
-    packets = rdpcap(str(pcap_path))
     flows = {}
 
     for pkt in packets:
-        if not IP in pkt:
+        if IP not in pkt:
             continue
 
         # Determine 5-tuple and direction

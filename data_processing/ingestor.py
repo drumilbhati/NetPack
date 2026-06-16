@@ -193,9 +193,13 @@ class EvidenceIngestor:
                     try:
                         print(f"Running DPI and Anomaly Detection for {filename}...")
 
+                        from scapy.all import rdpcap
+
+                        packets = rdpcap(str(file_path))
+
                         # Extract both packets (for protocol details) and flows (for ML)
-                        packet_records = extract_packet_metadata(file_path)
-                        flow_records = extract_flow_metadata(file_path)
+                        packet_records = extract_packet_metadata(packets)
+                        flow_records = extract_flow_metadata(packets)
 
                         # Use the same normalization logic as index_metadata.py
                         from .index_metadata import normalize_record
