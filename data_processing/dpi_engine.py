@@ -1,15 +1,33 @@
 import datetime
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from scapy.all import DNS, DNSQR, IP, TCP, UDP, rdpcap
+from scapy.all import DNS, DNSQR, IP, TCP, UDP, Raw, rdpcap
 from scapy.layers.http import HTTPRequest
+
+# Payload Signatures for sensitive data and common attack patterns
+PAYLOAD_SIGNATURES = {
+    "password_exposure": re.compile(
+        rb"(password|passwd|pwd|secret)\s*[:=]\s*(\w+)", re.IGNORECASE
+    ),
+    "sql_injection_attempt": re.compile(
+        rb"union\s+select|drop\s+table|select\s+.*\s+from\s+information_schema",
+        re.IGNORECASE,
+    ),
+    "private_key_exposure": re.compile(
+        rb"-----BEGIN (RSA|EC|DSA|OPENSSH)? PRIVATE KEY-----"
+    ),
+    "zip_archive_header": re.compile(rb"PK\x03\x04"),
+    "executable_header": re.compile(rb"MZ\x90\x00"),  # Windows PE
+    "elf_header": re.compile(rb"\x7fELF"),
+}
 
 
 def extract_packet_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
     """
     Extract metadata from Scapy packets.
-    Decodes HTTP requests (URL, User-Agent) and DNS queries.
+    Decodes HTTP, DNS, FTP, SMTP, SMB and matches payload signatures.
     """
     results = []
 
@@ -27,11 +45,13 @@ def extract_packet_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
             "size": len(pkt),
         }
 
+        # 1. TCP Analysis
         if TCP in pkt:
             res["source_port"] = pkt[TCP].sport
             res["destination_port"] = pkt[TCP].dport
             res["protocol"] = "TCP"
 
+            # HTTP
             if pkt.haslayer(HTTPRequest):
                 host = (
                     pkt[HTTPRequest].Host.decode(errors="replace")
@@ -49,12 +69,62 @@ def extract_packet_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
                     if pkt[HTTPRequest].User_Agent
                     else ""
                 )
+                res["protocol"] = "HTTP"
 
+            # FTP (Control Port 21)
+            elif res["source_port"] == 21 or res["destination_port"] == 21:
+                payload = bytes(pkt[TCP].payload)
+                if payload:
+                    msg = payload.decode(errors="replace").strip()
+                    if any(
+                        cmd in msg
+                        for cmd in ["USER", "PASS", "RETR", "STOR", "CWD", "LIST"]
+                    ):
+                        res["ftp_command"] = msg
+                        res["protocol"] = "FTP"
+
+            # SMTP (Ports 25, 587, 465)
+            elif res["destination_port"] in [25, 587, 465]:
+                payload = bytes(pkt[TCP].payload)
+                if payload:
+                    msg = payload.decode(errors="replace").strip()
+                    if any(
+                        cmd in msg
+                        for cmd in ["HELO", "EHLO", "MAIL FROM", "RCPT TO", "DATA"]
+                    ):
+                        res["smtp_command"] = msg
+                        res["protocol"] = "SMTP"
+
+            # SMB (Port 445)
+            elif res["destination_port"] == 445 or res["source_port"] == 445:
+                res["protocol"] = "SMB"
+                # Check for SMB2 Header
+                try:
+                    from scapy.layers.smb import SMB2_Header
+
+                    if pkt.haslayer(SMB2_Header):
+                        res["protocol"] = "SMB2"
+                        res["smb_command"] = pkt[SMB2_Header].Command
+                except ImportError:
+                    pass
+
+            # Payload Signature Matching
+            if Raw in pkt:
+                payload_data = pkt[Raw].load
+                matched = []
+                for sig_name, pattern in PAYLOAD_SIGNATURES.items():
+                    if pattern.search(payload_data):
+                        matched.append(sig_name)
+                if matched:
+                    res["payload_signatures"] = matched
+
+        # 2. UDP Analysis
         elif UDP in pkt:
             res["source_port"] = pkt[UDP].sport
             res["destination_port"] = pkt[UDP].dport
             res["protocol"] = "UDP"
 
+            # DNS
             if pkt.haslayer(DNSQR) and pkt.haslayer(DNS) and pkt[DNS].qr == 0:
                 qname = (
                     pkt[DNSQR].qname.decode(errors="replace")
@@ -62,6 +132,7 @@ def extract_packet_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
                     else ""
                 )
                 res["dns_query"] = qname.lower().rstrip(".")
+                res["protocol"] = "DNS"
 
         results.append(res)
 
@@ -71,7 +142,7 @@ def extract_packet_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
 def extract_flow_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
     """
     Extract flow-level metadata from Scapy packets.
-    Aggregates packets into flows based on (src_ip, dst_ip, src_port, dst_port, protocol).
+    Aggregates packets into flows based on (src_ip, dst_ip, sport, dport, protocol).
     """
     flows = {}
 
