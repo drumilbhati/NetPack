@@ -43,6 +43,9 @@ class AnomalyDetector:
         if not self.is_trained:
             raise ValueError("Model is not trained.")
 
+        if df.empty:
+            return np.array([])
+
         # Ensure all required features are present
         missing = [f for f in self.features if f not in df.columns]
         if missing:
@@ -57,6 +60,9 @@ class AnomalyDetector:
         """
         if not self.is_trained:
             raise ValueError("Model is not trained.")
+
+        if df.empty:
+            raise ValueError("Input DataFrame is empty.")
 
         # Ensure all required features are present
         missing = [f for f in self.features if f not in df.columns]
@@ -82,6 +88,17 @@ class AnomalyDetector:
             raise FileNotFoundError(f"Model file not found: {path}")
 
         data = joblib.load(path)
+
+        if not isinstance(data, dict) or "model" not in data or "features" not in data:
+            raise ValueError(f"Invalid model file structure at {path}")
+
+        # Validate feature contract
+        loaded_features = data["features"]
+        if hasattr(self, "features") and self.features != loaded_features:
+            raise ValueError(
+                f"Feature mismatch: expected {self.features}, got {loaded_features}"
+            )
+
         self.model = data["model"]
-        self.features = data["features"]
+        self.features = loaded_features
         self.is_trained = True

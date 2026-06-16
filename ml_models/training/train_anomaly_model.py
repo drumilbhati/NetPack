@@ -19,30 +19,34 @@ def generate_synthetic_data(
     Normal: Low to medium bytes, short duration.
     Anomalous: Very high bytes or very long duration.
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     n_anomalies = int(n_samples * anomaly_ratio)
     n_normal = n_samples - n_anomalies
 
     # Normal data
     normal_data = {
-        "bytes_sent": np.random.normal(500, 200, n_normal).clip(50, 2000),
-        "bytes_received": np.random.normal(1000, 500, n_normal).clip(100, 5000),
-        "duration": np.random.normal(5, 2, n_normal).clip(0.1, 20),
-        "packet_count": np.random.normal(10, 5, n_normal).clip(1, 100),
+        "bytes_sent": rng.normal(500, 200, n_normal).clip(50, 2000),
+        "bytes_received": rng.normal(1000, 500, n_normal).clip(100, 5000),
+        "duration": rng.normal(5, 2, n_normal).clip(0.1, 20),
+        "packet_count": rng.normal(10, 5, n_normal).clip(1, 100),
     }
 
     # Anomalous data (High volume exfiltration)
     anomalous_data = {
-        "bytes_sent": np.random.normal(100000, 20000, n_anomalies).clip(50000, 500000),
-        "bytes_received": np.random.normal(5000, 1000, n_anomalies).clip(1000, 10000),
-        "duration": np.random.normal(300, 100, n_anomalies).clip(60, 1000),
-        "packet_count": np.random.normal(500, 100, n_anomalies).clip(100, 2000),
+        "bytes_sent": rng.normal(100000, 20000, n_anomalies).clip(50000, 500000),
+        "bytes_received": rng.normal(5000, 1000, n_anomalies).clip(1000, 10000),
+        "duration": rng.normal(300, 100, n_anomalies).clip(60, 1000),
+        "packet_count": rng.normal(500, 100, n_anomalies).clip(100, 2000),
     }
 
     df_normal = pd.DataFrame(normal_data)
     df_anomalous = pd.DataFrame(anomalous_data)
 
-    return pd.concat([df_normal, df_anomalous]).sample(frac=1).reset_index(drop=True)
+    return (
+        pd.concat([df_normal, df_anomalous])
+        .sample(frac=1, random_state=seed)
+        .reset_index(drop=True)
+    )
 
 
 def main():
@@ -79,6 +83,11 @@ def main():
 
     print(f"Normal test prediction: {detector.predict(test_normal)[0]} (Expected 1)")
     print(f"Anomaly test prediction: {detector.predict(test_anomaly)[0]} (Expected -1)")
+
+    # Assertions for verification
+    assert detector.predict(test_normal)[0] == 1, "Normal flow misclassified"
+    assert detector.predict(test_anomaly)[0] == -1, "Anomalous flow misclassified"
+    print("Verification passed: Model predictions are correct.")
 
 
 if __name__ == "__main__":

@@ -32,8 +32,12 @@ try:
 
     ANOMALY_DETECTOR = AnomalyDetector()
     if os.path.exists(MODEL_PATH):
-        ANOMALY_DETECTOR.load(MODEL_PATH)
-        ML_READY = True
+        try:
+            ANOMALY_DETECTOR.load(MODEL_PATH)
+            ML_READY = True
+        except Exception as e:
+            ML_READY = False
+            print(f"Warning: Failed to load anomaly model from {MODEL_PATH}: {e}")
     else:
         ML_READY = False
         print(f"Warning: Anomaly model not found at {MODEL_PATH}")

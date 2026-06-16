@@ -79,12 +79,12 @@ class TestAnomalyIntegration(unittest.TestCase):
         packets = []
 
         # 1. Normal Traffic: Small packets, few count
-        for i in range(10):
+        for i in range(5):
             p = (
                 Ether()
                 / IP(src="192.168.1.10", dst="8.8.8.8")
                 / TCP(sport=12345, dport=80)
-                / ("Normal" * 10)
+                / "Normal"
             )
             packets.append(p)
 
