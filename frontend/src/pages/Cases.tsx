@@ -10,7 +10,7 @@ const Cases: React.FC = () => {
 
   const handleDownloadReport = (caseId: string) => {
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-    window.open(`${baseUrl.replace(/\/$/, '')}/reports/${caseId}`, '_blank');
+    window.open(`${baseUrl.replace(/\/$/, '')}/reports/${caseId}`, '_blank', 'noopener,noreferrer');
   };
 
   useEffect(() => {

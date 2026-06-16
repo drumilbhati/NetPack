@@ -107,5 +107,7 @@ async def generate_report(case_id: str):
     return Response(
         content=pdf_output,
         media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=NetPack_Report_{safe_case_id}.pdf"}
+    )
         headers={"Content-Disposition": f"attachment; filename=NetPack_Report_{case_id}.pdf"}
     )
