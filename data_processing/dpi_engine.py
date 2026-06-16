@@ -6,6 +6,8 @@ from typing import Any, Dict, List
 from scapy.all import DNS, DNSQR, IP, TCP, UDP, Raw, rdpcap
 from scapy.layers.http import HTTPRequest
 
+from .tcp_reassembler import TCPReassembler
+
 # Payload Signatures for sensitive data and common attack patterns
 PAYLOAD_SIGNATURES = {
     "password_exposure": re.compile(
@@ -208,5 +210,30 @@ def extract_flow_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
             f["start_time"], datetime.timezone.utc
         ).isoformat()
         results.append(f)
+
+    return results
+
+
+def extract_tcp_streams(packets: List[Any]) -> Dict[str, Any]:
+    """
+    Reassemble TCP streams from packets and return as a dictionary.
+    Keys are string representations of the 5-tuple.
+    """
+    reassembler = TCPReassembler()
+    reassembler.process_packets(packets)
+
+    bidi_streams = reassembler.get_bidirectional_streams()
+
+    results = {}
+    for key, directions in bidi_streams.items():
+        # key is ((ip1, port1), (ip2, port2))
+        stream_id = f"{key[0][0]}:{key[0][1]} <-> {key[1][0]}:{key[1][1]}"
+        results[stream_id] = {
+            "directions": {
+                dir_name: payload.decode(errors="replace")
+                for dir_name, payload in directions.items()
+            },
+            "total_size": sum(len(p) for p in directions.values()),
+        }
 
     return results

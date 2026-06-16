@@ -120,6 +120,46 @@ class TestDPIEngine(unittest.TestCase):
         res = results[0]
         self.assertIn("sql_injection_attempt", res["payload_signatures"])
 
+    def test_extract_tcp_streams(self):
+        from data_processing.dpi_engine import extract_tcp_streams
+
+        pkts = [
+            Ether()
+            / IP(src="1.1.1.1", dst="2.2.2.2")
+            / TCP(sport=1000, dport=80, seq=100)
+            / Raw(load=b"GET / HTTP/1.1\r\n"),
+            Ether()
+            / IP(src="2.2.2.2", dst="1.1.1.1")
+            / TCP(sport=80, dport=1000, seq=500)
+            / Raw(load=b"HTTP/1.1 200 OK\r\n"),
+            Ether()
+            / IP(src="1.1.1.1", dst="2.2.2.2")
+            / TCP(sport=1000, dport=80, seq=116)
+            / Raw(load=b"Host: example.com\r\n\r\n"),
+        ]
+        # Set timestamps
+        for i, p in enumerate(pkts):
+            p.time = 1623845600.0 + i
+
+        streams = extract_tcp_streams(pkts)
+        self.assertEqual(len(streams), 1)
+
+        # Check bidirectional content
+        stream_id = "1.1.1.1:1000 <-> 2.2.2.2:80"
+        self.assertIn(stream_id, streams)
+        directions = streams[stream_id]["directions"]
+
+        self.assertIn("1.1.1.1:1000 -> 2.2.2.2:80", directions)
+        self.assertIn("2.2.2.2:80 -> 1.1.1.1:1000", directions)
+
+        self.assertEqual(
+            directions["1.1.1.1:1000 -> 2.2.2.2:80"],
+            "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+        )
+        self.assertEqual(
+            directions["2.2.2.2:80 -> 1.1.1.1:1000"], "HTTP/1.1 200 OK\r\n"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
