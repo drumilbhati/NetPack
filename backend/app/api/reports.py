@@ -1,4 +1,5 @@
 import io
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -34,6 +35,9 @@ class ForensicReport(FPDF):
 
 @router.get("/{case_id}")
 async def generate_report(case_id: str):
+    # Sanitize case_id for use in headers
+    safe_case_id = re.sub(r'[^a-zA-Z0-9-]', '_', case_id)
+    
     # Find the case in mock data
     case = next((c for c in mock_cases if c.id == case_id), None)
     
@@ -108,6 +112,4 @@ async def generate_report(case_id: str):
         content=pdf_output,
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=NetPack_Report_{safe_case_id}.pdf"}
-    )
-        headers={"Content-Disposition": f"attachment; filename=NetPack_Report_{case_id}.pdf"}
     )
