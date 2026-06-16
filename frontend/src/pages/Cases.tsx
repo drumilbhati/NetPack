@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { fetchCases } from "../api/cases";
 import { type Case } from "../types";
-import { FileText } from "lucide-react";
+import { FileText, Eye } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const Cases: React.FC = () => {
 	const [cases, setCases] = useState<Case[]>([]);
@@ -247,20 +248,38 @@ const Cases: React.FC = () => {
 										{new Date(caseItem.created_at).toLocaleString()}
 									</td>
 									<td>
-										<button
-											className="btn-primary"
-											style={{
-												padding: "0.25rem 0.75rem",
-												fontSize: "0.75rem",
-												display: "flex",
-												alignItems: "center",
-												gap: "0.5rem",
-											}}
-											onClick={() => handleDownloadReport(caseItem.id)}
-										>
-											<FileText size={14} />
-											Report
-										</button>
+										<div style={{ display: "flex", gap: "0.5rem" }}>
+											<Link
+												to={`/cases/${caseItem.id}`}
+												className="btn-primary"
+												style={{
+													padding: "0.25rem 0.75rem",
+													fontSize: "0.75rem",
+													display: "flex",
+													alignItems: "center",
+													gap: "0.5rem",
+													textDecoration: "none",
+												}}
+											>
+												<Eye size={14} />
+												Details
+											</Link>
+											<button
+												className="btn-primary"
+												style={{
+													padding: "0.25rem 0.75rem",
+													fontSize: "0.75rem",
+													display: "flex",
+													alignItems: "center",
+													gap: "0.5rem",
+													background: "var(--text-secondary)",
+												}}
+												onClick={() => handleDownloadReport(caseItem.id)}
+											>
+												<FileText size={14} />
+												Report
+											</button>
+										</div>
 									</td>
 								</tr>
 							))
