@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import cases, uploads, search
 
@@ -6,6 +7,15 @@ app = FastAPI(
     title="NetPack API",
     description="Backend API for NetPack Network Analysis Tool",
     version="0.1.0",
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For development; refine for production
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include routers
