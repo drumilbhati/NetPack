@@ -16,6 +16,7 @@ A centralized platform for capturing, analyzing, and visualizing network traffic
 1. **Infrastructure:** Navigate to `infra/`, copy `.env.example` to `.env`, and run `docker compose up -d postgres minio minio-init elasticsearch`.
 2. **Backend:** Navigate to `backend/`, install requirements, and run `uvicorn app.main:app`.
 3. **Frontend:** Navigate to `frontend/`, run `npm install` and `npm run dev`.
+4. **Live Capture (Optional):** Run `python3 data_processing/live_capture.py --interface eth0 --case-id <UUID>` to start sniffing.
 
 ## Documentation
 - [Problem Statement](./PROBLEM_STATEMENT.md)
