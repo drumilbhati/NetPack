@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,13 @@ class PacketMetadata(BaseModel):
     timestamp: Optional[datetime] = None
     http_url: Optional[str] = None
     http_user_agent: Optional[str] = None
+    http_host: Optional[str] = None
+    tls_sni: Optional[str] = None
     dns_query: Optional[str] = None
+    ftp_command: Optional[str] = None
+    smtp_command: Optional[str] = None
+    smb_command: Optional[str] = None
+    payload_signatures: Optional[List[str]] = None
     bytes_sent: Optional[int] = None
     bytes_received: Optional[int] = None
     duration: Optional[float] = None

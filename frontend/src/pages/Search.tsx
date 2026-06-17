@@ -1,81 +1,191 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
-	Search as SearchIcon,
 	ChevronDown,
 	ChevronUp,
 	Database,
+	Search as SearchIcon,
 } from "lucide-react";
 
-interface SearchResult {
-	timestamp: string;
-	source_ip: string;
-	destination_ip: string;
-	source_port?: number;
-	destination_port?: number;
-	protocol: string;
-	http_url?: string;
-	dns_query?: string;
-	payload_signatures?: string[];
-	metadata: any;
-}
+import { searchPackets } from "../api/search";
+import { type SearchResult } from "../types";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+type FilterState = {
+	caseId: string;
+	sourceIp: string;
+	destinationIp: string;
+	sourcePort: string;
+	destinationPort: string;
+	protocol: string;
+	dnsQuery: string;
+	userAgent: string;
+	httpHost: string;
+	tlsSni: string;
+	startTime: string;
+	endTime: string;
+	anomalyOnly: boolean;
+};
+
+const DEFAULT_FILTERS: FilterState = {
+	caseId: "",
+	sourceIp: "",
+	destinationIp: "",
+	sourcePort: "",
+	destinationPort: "",
+	protocol: "",
+	dnsQuery: "",
+	userAgent: "",
+	httpHost: "",
+	tlsSni: "",
+	startTime: "",
+	endTime: "",
+	anomalyOnly: false,
+};
+
+const pageSize = 25;
+
+const protocolOptions = [
+	"",
+	"TCP",
+	"UDP",
+	"HTTP",
+	"DNS",
+	"TLS",
+	"FTP",
+	"SMTP",
+	"SMB",
+	"ICMP",
+];
 
 const Search: React.FC = () => {
+	const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 	const [results, setResults] = useState<SearchResult[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [expandedRow, setExpandedRow] = useState<number | null>(null);
-
-	// Filters
-	const [srcIp, setSrcIp] = useState("");
-	const [dstIp, setDstIp] = useState("");
-	const [protocol, setProtocol] = useState("");
-	const [dnsQuery, setDnsQuery] = useState("");
-	const [userAgent, setUserAgent] = useState("");
-
-	// Pagination
 	const [page, setPage] = useState(0);
-	const pageSize = 50;
 
-	const handleSearch = async (e?: React.FormEvent, resetPage = true) => {
-		if (e) e.preventDefault();
-
-		const currentPage = resetPage ? 0 : page;
-		if (resetPage) setPage(0);
-
+	const executeSearch = async (nextPage = 0, nextFilters = filters) => {
 		setLoading(true);
 		setError(null);
+		setExpandedRow(null);
 
 		try {
-			const params = new URLSearchParams();
-			if (srcIp) params.append("source_ip", srcIp);
-			if (dstIp) params.append("destination_ip", dstIp);
-			if (protocol) params.append("protocol", protocol.toUpperCase());
-			if (dnsQuery) params.append("dns_query", dnsQuery);
-			if (userAgent) params.append("user_agent", userAgent);
+			const query = await searchPackets({
+				case_id: nextFilters.caseId.trim() || undefined,
+				source_ip: nextFilters.sourceIp.trim() || undefined,
+				destination_ip: nextFilters.destinationIp.trim() || undefined,
+				source_port: nextFilters.sourcePort.trim()
+					? Number(nextFilters.sourcePort)
+					: undefined,
+				destination_port: nextFilters.destinationPort.trim()
+					? Number(nextFilters.destinationPort)
+					: undefined,
+				protocol: nextFilters.protocol.trim() || undefined,
+				dns_query: nextFilters.dnsQuery.trim() || undefined,
+				user_agent: nextFilters.userAgent.trim() || undefined,
+				http_host: nextFilters.httpHost.trim() || undefined,
+				tls_sni: nextFilters.tlsSni.trim() || undefined,
+				start_time: nextFilters.startTime.trim() || undefined,
+				end_time: nextFilters.endTime.trim() || undefined,
+				is_anomaly: nextFilters.anomalyOnly ? true : undefined,
+				size: pageSize,
+				from: nextPage * pageSize,
+			});
 
-			params.append("size", pageSize.toString());
-			params.append("from", (currentPage * pageSize).toString());
-
-			const res = await fetch(`${BASE_URL}/search/?${params.toString()}`);
-			if (!res.ok) throw new Error("Search failed");
-			const data = await res.json();
-			setResults(data);
-		} catch (err: any) {
-			setError(err.message);
+			setResults(query);
+			setPage(nextPage);
+		} catch (requestError) {
+			setError(
+				requestError instanceof Error ? requestError.message : "Search failed",
+			);
 		} finally {
 			setLoading(false);
 		}
 	};
 
-	useEffect(() => {
-		if (page > 0) handleSearch(undefined, false);
-	}, [page]);
+	const handleSubmit = (event: React.FormEvent) => {
+		event.preventDefault();
+		void executeSearch(0, filters);
+	};
+
+	const handleClear = () => {
+		setFilters(DEFAULT_FILTERS);
+		setResults([]);
+		setExpandedRow(null);
+		setPage(0);
+		setError(null);
+	};
+
+	const formatBytes = (value?: number) => {
+		if (value === undefined || value === null) return "—";
+		if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+		if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
+		return `${value} B`;
+	};
+
+	const formatTimestamp = (value?: string) => {
+		if (!value) return "—";
+		const date = new Date(value);
+		return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+	};
+
+	const displaySignalTags = (result: SearchResult) => {
+		const tags: Array<{ label: string; color: string }> = [];
+
+		if (result.dns_query)
+			tags.push({ label: `DNS: ${result.dns_query}`, color: "#059669" });
+		if (result.http_url)
+			tags.push({ label: `URL: ${result.http_url}`, color: "#2563eb" });
+		if (result.http_host)
+			tags.push({ label: `Host: ${result.http_host}`, color: "#7c3aed" });
+		if (result.tls_sni)
+			tags.push({ label: `SNI: ${result.tls_sni}`, color: "#0f766e" });
+		if (result.is_anomaly) tags.push({ label: "Anomaly", color: "#dc2626" });
+		(result.payload_signatures || []).forEach((signature) => {
+			tags.push({ label: `[${signature}]`, color: "#ef4444" });
+		});
+
+		return tags;
+	};
+
+	const detailRows = (result: SearchResult) => [
+		["Case ID", result.case_id],
+		["Evidence ID", result.evidence_id],
+		["SHA-256", result.sha256],
+		["HTTP URL", result.http_url],
+		["HTTP Host", result.http_host],
+		["HTTP User-Agent", result.http_user_agent],
+		["TLS SNI", result.tls_sni],
+		["DNS Query", result.dns_query],
+		["FTP Command", result.ftp_command],
+		["SMTP Command", result.smtp_command],
+		["SMB Command", result.smb_command],
+		["Bytes Sent", formatBytes(result.bytes_sent)],
+		["Bytes Received", formatBytes(result.bytes_received)],
+		[
+			"Duration",
+			result.duration !== undefined ? `${result.duration.toFixed(3)}s` : "—",
+		],
+		[
+			"Packet Count",
+			result.packet_count !== undefined ? String(result.packet_count) : "—",
+		],
+		[
+			"Anomaly Score",
+			result.anomaly_score !== undefined ? String(result.anomaly_score) : "—",
+		],
+		[
+			"Anomaly Flag",
+			result.is_anomaly === undefined
+				? "—"
+				: result.is_anomaly
+					? "true"
+					: "false",
+		],
+	];
 
 	return (
 		<div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-			{/* Search & Filter Bar */}
 			<div className="card">
 				<h3
 					style={{
@@ -87,59 +197,103 @@ const Search: React.FC = () => {
 				>
 					<SearchIcon size={20} /> Advanced Forensic Search
 				</h3>
-				<form onSubmit={(e) => handleSearch(e, true)}>
+				<form onSubmit={handleSubmit}>
 					<div
 						style={{
 							display: "grid",
-							gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+							gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
 							gap: "1rem",
 							marginBottom: "1rem",
 						}}
 					>
+						{[
+							{
+								label: "Case ID",
+								value: filters.caseId,
+								setter: (value: string) =>
+									setFilters((prev) => ({ ...prev, caseId: value })),
+							},
+							{
+								label: "Source IP",
+								value: filters.sourceIp,
+								setter: (value: string) =>
+									setFilters((prev) => ({ ...prev, sourceIp: value })),
+							},
+							{
+								label: "Destination IP",
+								value: filters.destinationIp,
+								setter: (value: string) =>
+									setFilters((prev) => ({ ...prev, destinationIp: value })),
+							},
+							{
+								label: "Source Port",
+								value: filters.sourcePort,
+								inputType: "number",
+								setter: (value: string) =>
+									setFilters((prev) => ({ ...prev, sourcePort: value })),
+							},
+							{
+								label: "Destination Port",
+								value: filters.destinationPort,
+								inputType: "number",
+								setter: (value: string) =>
+									setFilters((prev) => ({ ...prev, destinationPort: value })),
+							},
+							{
+								label: "DNS Query",
+								value: filters.dnsQuery,
+								setter: (value: string) =>
+									setFilters((prev) => ({ ...prev, dnsQuery: value })),
+							},
+							{
+								label: "HTTP User-Agent",
+								value: filters.userAgent,
+								setter: (value: string) =>
+									setFilters((prev) => ({ ...prev, userAgent: value })),
+							},
+							{
+								label: "HTTP Host",
+								value: filters.httpHost,
+								setter: (value: string) =>
+									setFilters((prev) => ({ ...prev, httpHost: value })),
+							},
+							{
+								label: "TLS SNI",
+								value: filters.tlsSni,
+								setter: (value: string) =>
+									setFilters((prev) => ({ ...prev, tlsSni: value })),
+							},
+						].map((field) => (
+							<div key={field.label}>
+								<label
+									style={{
+										fontSize: "0.75rem",
+										fontWeight: 700,
+										textTransform: "uppercase",
+										display: "block",
+										marginBottom: "0.35rem",
+									}}
+								>
+									{field.label}
+								</label>
+								<input
+									type={field.inputType ?? "text"}
+									className="search-input"
+									style={{ width: "100%" }}
+									value={field.value}
+									onChange={(event) => field.setter(event.target.value)}
+								/>
+							</div>
+						))}
+
 						<div>
 							<label
 								style={{
 									fontSize: "0.75rem",
 									fontWeight: 700,
 									textTransform: "uppercase",
-								}}
-							>
-								Source IP
-							</label>
-							<input
-								type="text"
-								className="search-input"
-								style={{ width: "100%" }}
-								value={srcIp}
-								onChange={(e) => setSrcIp(e.target.value)}
-								placeholder="e.g. 192.168.1.1"
-							/>
-						</div>
-						<div>
-							<label
-								style={{
-									fontSize: "0.75rem",
-									fontWeight: 700,
-									textTransform: "uppercase",
-								}}
-							>
-								Dest IP
-							</label>
-							<input
-								type="text"
-								className="search-input"
-								style={{ width: "100%" }}
-								value={dstIp}
-								onChange={(e) => setDstIp(e.target.value)}
-								placeholder="e.g. 8.8.8.8"
-							/>
-						</div>
-						<div>
-							<label
-								style={{
-									fontSize: "0.75rem",
-									fontWeight: 700,
-									textTransform: "uppercase",
+									display: "block",
+									marginBottom: "0.35rem",
 								}}
 							>
 								Protocol
@@ -147,40 +301,100 @@ const Search: React.FC = () => {
 							<select
 								className="select-input"
 								style={{ width: "100%" }}
-								value={protocol}
-								onChange={(e) => setProtocol(e.target.value)}
+								value={filters.protocol}
+								onChange={(event) =>
+									setFilters((prev) => ({
+										...prev,
+										protocol: event.target.value,
+									}))
+								}
 							>
-								<option value="">All Protocols</option>
-								<option value="TCP">TCP</option>
-								<option value="UDP">UDP</option>
-								<option value="HTTP">HTTP</option>
-								<option value="DNS">DNS</option>
-								<option value="FTP">FTP</option>
-								<option value="SMTP">SMTP</option>
-								<option value="SMB">SMB</option>
-								<option value="ICMP">ICMP</option>
+								{protocolOptions.map((option) => (
+									<option key={option || "all"} value={option}>
+										{option || "All Protocols"}
+									</option>
+								))}
 							</select>
 						</div>
+
 						<div>
 							<label
 								style={{
 									fontSize: "0.75rem",
 									fontWeight: 700,
 									textTransform: "uppercase",
+									display: "block",
+									marginBottom: "0.35rem",
 								}}
 							>
-								DNS/Domain
+								Start Time
 							</label>
 							<input
-								type="text"
+								type="datetime-local"
 								className="search-input"
 								style={{ width: "100%" }}
-								value={dnsQuery}
-								onChange={(e) => setDnsQuery(e.target.value)}
-								placeholder="e.g. example.com"
+								value={filters.startTime}
+								onChange={(event) =>
+									setFilters((prev) => ({
+										...prev,
+										startTime: event.target.value,
+									}))
+								}
 							/>
 						</div>
+
+						<div>
+							<label
+								style={{
+									fontSize: "0.75rem",
+									fontWeight: 700,
+									textTransform: "uppercase",
+									display: "block",
+									marginBottom: "0.35rem",
+								}}
+							>
+								End Time
+							</label>
+							<input
+								type="datetime-local"
+								className="search-input"
+								style={{ width: "100%" }}
+								value={filters.endTime}
+								onChange={(event) =>
+									setFilters((prev) => ({
+										...prev,
+										endTime: event.target.value,
+									}))
+								}
+							/>
+						</div>
+
+						<div style={{ display: "flex", alignItems: "end" }}>
+							<label
+								style={{
+									display: "flex",
+									alignItems: "center",
+									gap: "0.5rem",
+									cursor: "pointer",
+								}}
+							>
+								<input
+									type="checkbox"
+									checked={filters.anomalyOnly}
+									onChange={(event) =>
+										setFilters((prev) => ({
+											...prev,
+											anomalyOnly: event.target.checked,
+										}))
+									}
+								/>
+								<span style={{ fontSize: "0.875rem", fontWeight: 600 }}>
+									Anomaly only
+								</span>
+							</label>
+						</div>
 					</div>
+
 					<div
 						style={{ display: "flex", justifyContent: "flex-end", gap: "1rem" }}
 					>
@@ -188,13 +402,7 @@ const Search: React.FC = () => {
 							type="button"
 							className="btn-primary"
 							style={{ background: "var(--text-secondary)" }}
-							onClick={() => {
-								setSrcIp("");
-								setDstIp("");
-								setProtocol("");
-								setDnsQuery("");
-								setUserAgent("");
-							}}
+							onClick={handleClear}
 						>
 							Clear
 						</button>
@@ -207,168 +415,234 @@ const Search: React.FC = () => {
 
 			{error && <div className="card text-red-500">Error: {error}</div>}
 
-			{/* Results Table */}
 			<div className="card" style={{ padding: 0 }}>
 				<table style={{ tableLayout: "fixed" }}>
 					<thead>
 						<tr>
-							<th style={{ width: "40px" }}></th>
+							<th style={{ width: "40px" }} />
 							<th style={{ width: "180px" }}>Timestamp</th>
+							<th style={{ width: "180px" }}>Case / Evidence</th>
 							<th>Source</th>
 							<th>Destination</th>
-							<th style={{ width: "100px" }}>Protocol</th>
-							<th>Details</th>
+							<th style={{ width: "90px" }}>Protocol</th>
+							<th>Signals</th>
 						</tr>
 					</thead>
 					<tbody>
-						{results.length === 0 ? (
+						{loading && results.length === 0 ? (
 							<tr>
 								<td
-									colSpan={6}
+									colSpan={7}
+									style={{ textAlign: "center", padding: "3rem" }}
+								>
+									Loading search results...
+								</td>
+							</tr>
+						) : results.length === 0 ? (
+							<tr>
+								<td
+									colSpan={7}
 									style={{
 										textAlign: "center",
 										padding: "3rem",
 										color: "var(--text-secondary)",
 									}}
 								>
-									{loading
-										? "Querying Elasticsearch clusters..."
-										: "No records found. Use the filters above to search."}
+									No records found. Adjust the filters above to search.
 								</td>
 							</tr>
 						) : (
-							results.map((res, i) => (
-								<React.Fragment key={i}>
-									<tr
-										style={{
-											cursor: "pointer",
-											background: expandedRow === i ? "#f9fafb" : "transparent",
-										}}
-										onClick={() => setExpandedRow(expandedRow === i ? null : i)}
-									>
-										<td style={{ textAlign: "center" }}>
-											{expandedRow === i ? (
-												<ChevronUp size={16} />
-											) : (
-												<ChevronDown size={16} />
-											)}
-										</td>
-										<td style={{ fontSize: "0.75rem" }}>
-											{new Date(res.timestamp).toLocaleString()}
-										</td>
-										<td
+							results.map((result, index) => {
+								const rowKey = `${result.evidence_id ?? "evidence"}-${result.timestamp ?? index}-${index}`;
+								const isExpanded = expandedRow === index;
+								const tags = displaySignalTags(result);
+								const rowHighlight = result.is_anomaly
+									? "#fef2f2"
+									: "transparent";
+
+								return (
+									<React.Fragment key={rowKey}>
+										<tr
 											style={{
-												overflow: "hidden",
-												textOverflow: "ellipsis",
-												whiteSpace: "nowrap",
+												cursor: "pointer",
+												background: isExpanded ? "#f9fafb" : rowHighlight,
 											}}
+											onClick={() => setExpandedRow(isExpanded ? null : index)}
 										>
-											{res.source_ip}
-											{res.source_port ? `:${res.source_port}` : ""}
-										</td>
-										<td
-											style={{
-												overflow: "hidden",
-												textOverflow: "ellipsis",
-												whiteSpace: "nowrap",
-											}}
-										>
-											{res.destination_ip}
-											{res.destination_port ? `:${res.destination_port}` : ""}
-										</td>
-										<td>
-											<span
+											<td style={{ textAlign: "center" }}>
+												{isExpanded ? (
+													<ChevronUp size={16} />
+												) : (
+													<ChevronDown size={16} />
+												)}
+											</td>
+											<td style={{ fontSize: "0.75rem" }}>
+												{formatTimestamp(result.timestamp)}
+											</td>
+											<td style={{ fontSize: "0.8rem" }}>
+												<div style={{ fontWeight: 600 }}>
+													{result.case_id ?? "—"}
+												</div>
+												<div
+													style={{
+														color: "var(--text-secondary)",
+														fontSize: "0.75rem",
+													}}
+												>
+													{result.evidence_id ?? "No evidence ID"}
+												</div>
+											</td>
+											<td
 												style={{
-													fontWeight: 600,
-													color: "var(--primary-color)",
+													overflow: "hidden",
+													textOverflow: "ellipsis",
+													whiteSpace: "nowrap",
 												}}
 											>
-												{res.protocol}
-											</span>
-										</td>
-										<td
-											style={{
-												overflow: "hidden",
-												textOverflow: "ellipsis",
-												whiteSpace: "nowrap",
-											}}
-										>
-											<div style={{ fontSize: "0.75rem" }}>
-												{res.dns_query && (
-													<span style={{ color: "#059669" }}>
-														DNS: {res.dns_query}{" "}
-													</span>
-												)}
-												{res.http_url && (
-													<span style={{ color: "#2563eb" }}>
-														URL: {res.http_url}{" "}
-													</span>
-												)}
-												{res.payload_signatures &&
-													res.payload_signatures.map((s) => (
-														<span
-															key={s}
-															style={{
-																color: "#ef4444",
-																fontWeight: 600,
-																marginRight: "0.5rem",
-															}}
-														>
-															[{s}]
-														</span>
-													))}
-											</div>
-										</td>
-									</tr>
-									{expandedRow === i && (
-										<tr>
+												{result.source_ip ?? "—"}
+												{result.source_port ? `:${result.source_port}` : ""}
+											</td>
 											<td
-												colSpan={6}
-												style={{ padding: "1.5rem", background: "#f9fafb" }}
+												style={{
+													overflow: "hidden",
+													textOverflow: "ellipsis",
+													whiteSpace: "nowrap",
+												}}
+											>
+												{result.destination_ip ?? "—"}
+												{result.destination_port
+													? `:${result.destination_port}`
+													: ""}
+											</td>
+											<td>
+												<span
+													style={{
+														fontWeight: 700,
+														color: "var(--primary-color)",
+													}}
+												>
+													{result.protocol ?? "—"}
+												</span>
+											</td>
+											<td
+												style={{ overflow: "hidden", textOverflow: "ellipsis" }}
 											>
 												<div
 													style={{
 														display: "flex",
-														gap: "1rem",
-														alignItems: "flex-start",
+														flexWrap: "wrap",
+														gap: "0.35rem",
 													}}
 												>
-													<div style={{ flex: 1 }}>
-														<h4
-															style={{
-																margin: "0 0 1rem 0",
-																display: "flex",
-																alignItems: "center",
-																gap: "0.5rem",
-															}}
-														>
-															<Database size={16} /> Raw Forensic Metadata
-														</h4>
-														<pre
-															style={{
-																background: "#1f2937",
-																color: "#f3f4f6",
-																padding: "1rem",
-																borderRadius: "0.5rem",
-																fontSize: "0.75rem",
-																overflow: "auto",
-																maxHeight: "300px",
-															}}
-														>
-															{JSON.stringify(res.metadata, null, 2)}
-														</pre>
-													</div>
+													{tags.length > 0 ? (
+														tags.map((tag) => (
+															<span
+																key={`${rowKey}-${tag.label}`}
+																style={{
+																	background: `${tag.color}1A`,
+																	color: tag.color,
+																	padding: "0.15rem 0.4rem",
+																	borderRadius: "999px",
+																	fontSize: "0.7rem",
+																	fontWeight: 700,
+																}}
+															>
+																{tag.label}
+															</span>
+														))
+													) : (
+														<span style={{ color: "var(--text-secondary)" }}>
+															No indicators
+														</span>
+													)}
 												</div>
 											</td>
 										</tr>
-									)}
-								</React.Fragment>
-							))
+										{isExpanded && (
+											<tr>
+												<td
+													colSpan={7}
+													style={{ padding: "1.5rem", background: "#f9fafb" }}
+												>
+													<div
+														style={{
+															display: "grid",
+															gap: "1rem",
+															gridTemplateColumns: "1fr 1fr",
+														}}
+													>
+														<div>
+															<h4
+																style={{
+																	margin: "0 0 1rem 0",
+																	display: "flex",
+																	alignItems: "center",
+																	gap: "0.5rem",
+																}}
+															>
+																<Database size={16} /> Result Details
+															</h4>
+															<div
+																style={{
+																	display: "grid",
+																	gridTemplateColumns:
+																		"repeat(2, minmax(0, 1fr))",
+																	gap: "0.75rem",
+																}}
+															>
+																{detailRows(result).map(([label, value]) => (
+																	<div key={`${rowKey}-${label}`}>
+																		<div
+																			style={{
+																				fontSize: "0.7rem",
+																				color: "var(--text-secondary)",
+																				textTransform: "uppercase",
+																				fontWeight: 700,
+																			}}
+																		>
+																			{label}
+																		</div>
+																		<div
+																			style={{
+																				fontSize: "0.875rem",
+																				wordBreak: "break-word",
+																			}}
+																		>
+																			{value ?? "—"}
+																		</div>
+																	</div>
+																))}
+															</div>
+														</div>
+														<div>
+															<h4 style={{ margin: "0 0 1rem 0" }}>
+																Raw Metadata
+															</h4>
+															<pre
+																style={{
+																	background: "#1f2937",
+																	color: "#f3f4f6",
+																	padding: "1rem",
+																	borderRadius: "0.5rem",
+																	fontSize: "0.75rem",
+																	overflow: "auto",
+																	maxHeight: "320px",
+																}}
+															>
+																{JSON.stringify(result.metadata ?? {}, null, 2)}
+															</pre>
+														</div>
+													</div>
+												</td>
+											</tr>
+										)}
+									</React.Fragment>
+								);
+							})
 						)}
 					</tbody>
 				</table>
 
-				{/* Pagination Controls */}
 				{results.length > 0 && (
 					<div
 						style={{
@@ -377,18 +651,19 @@ const Search: React.FC = () => {
 							display: "flex",
 							justifyContent: "space-between",
 							alignItems: "center",
+							gap: "1rem",
 						}}
 					>
 						<span
 							style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}
 						>
-							Showing {results.length} records
+							Showing {results.length} records on page {page + 1}
 						</span>
 						<div style={{ display: "flex", gap: "0.5rem" }}>
 							<button
 								className="btn-primary btn-sm"
-								disabled={page === 0}
-								onClick={() => setPage(page - 1)}
+								disabled={page === 0 || loading}
+								onClick={() => void executeSearch(page - 1, filters)}
 							>
 								Previous
 							</button>
@@ -403,8 +678,8 @@ const Search: React.FC = () => {
 							</span>
 							<button
 								className="btn-primary btn-sm"
-								disabled={results.length < pageSize}
-								onClick={() => setPage(page + 1)}
+								disabled={results.length < pageSize || loading}
+								onClick={() => void executeSearch(page + 1, filters)}
 							>
 								Next
 							</button>

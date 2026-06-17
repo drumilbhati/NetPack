@@ -1,4 +1,3 @@
-import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -36,44 +35,80 @@ class ElasticsearchService:
 
     async def search_packets(
         self,
+        case_id: Optional[str] = None,
         source_ip: Optional[str] = None,
         destination_ip: Optional[str] = None,
+        source_port: Optional[int] = None,
+        destination_port: Optional[int] = None,
         protocol: Optional[str] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         http_user_agent: Optional[str] = None,
+        http_host: Optional[str] = None,
+        tls_sni: Optional[str] = None,
         dns_query: Optional[str] = None,
+        is_anomaly: Optional[bool] = None,
         size: int = 100,
         from_: int = 0,
     ) -> List[Dict[str, Any]]:
-        query = {"bool": {"must": []}}
+        filter_clauses: List[Dict[str, Any]] = []
 
-        if source_ip:
-            query["bool"]["must"].append({"term": {"source_ip": source_ip}})
-        if destination_ip:
-            query["bool"]["must"].append({"term": {"destination_ip": destination_ip}})
-        if protocol:
-            query["bool"]["must"].append({"term": {"protocol": protocol}})
-        if http_user_agent:
-            query["bool"]["must"].append({"term": {"http_user_agent": http_user_agent}})
-        if dns_query:
-            query["bool"]["must"].append({"term": {"dns_query": dns_query}})
+        def add_term(field: str, value: Any) -> None:
+            if value is not None and value != "":
+                filter_clauses.append({"term": {field: value}})
+
+        def add_wildcard(field: str, value: Optional[str]) -> None:
+            if not value:
+                return
+            pattern = value.strip()
+            if not pattern:
+                return
+            if "*" not in pattern and "?" not in pattern:
+                pattern = f"*{pattern}*"
+            filter_clauses.append(
+                {
+                    "wildcard": {
+                        field: {
+                            "value": pattern,
+                            "case_insensitive": True,
+                        }
+                    }
+                }
+            )
+
+        add_term("case_id", case_id)
+        add_term("source_ip", source_ip)
+        add_term("destination_ip", destination_ip)
+        add_term("source_port", source_port)
+        add_term("destination_port", destination_port)
+        add_term("protocol", protocol)
+        add_wildcard("http_user_agent", http_user_agent)
+        add_wildcard("http_host", http_host)
+        add_wildcard("tls_sni", tls_sni)
+        add_wildcard("dns_query", dns_query)
+        if is_anomaly is not None:
+            add_term("is_anomaly", is_anomaly)
 
         if start_time or end_time:
-            time_range = {}
+            time_range: Dict[str, Any] = {}
             if start_time:
                 time_range["gte"] = start_time
             if end_time:
                 time_range["lte"] = end_time
-            query["bool"]["must"].append({"range": {"timestamp": time_range}})
+            filter_clauses.append({"range": {"timestamp": time_range}})
 
-        if not query["bool"]["must"]:
-            raise HTTPException(
-                status_code=400,
-                detail="At least one search filter (IP, protocol, User-Agent, DNS, or time range) must be provided.",
-            )
+        final_query = (
+            {"match_all": {}}
+            if not filter_clauses
+            else {"bool": {"filter": filter_clauses}}
+        )
 
-        body = {"query": query, "size": size, "from": from_}
+        body = {
+            "query": final_query,
+            "size": size,
+            "from": from_,
+            "sort": [{"timestamp": {"order": "desc"}}],
+        }
 
         response = await self._request_json("POST", f"{INDEX_NAME}/_search", body)
         hits = response.get("hits", {}).get("hits", [])

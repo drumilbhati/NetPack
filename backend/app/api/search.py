@@ -10,15 +10,23 @@ router = APIRouter()
 
 @router.get("/", response_model=List[PacketMetadata])
 async def search(
+    case_id: Optional[str] = Query(None, description="Filter by case ID"),
     source_ip: Optional[str] = Query(None, description="Filter by source IP address"),
     destination_ip: Optional[str] = Query(
         None, description="Filter by destination IP address"
+    ),
+    source_port: Optional[int] = Query(None, description="Filter by source port"),
+    destination_port: Optional[int] = Query(
+        None, description="Filter by destination port"
     ),
     protocol: Optional[str] = Query(
         None, description="Filter by protocol (e.g., TCP, UDP)"
     ),
     user_agent: Optional[str] = Query(None, description="Filter by HTTP User-Agent"),
+    http_host: Optional[str] = Query(None, description="Filter by HTTP host"),
+    tls_sni: Optional[str] = Query(None, description="Filter by TLS SNI"),
     dns_query: Optional[str] = Query(None, description="Filter by DNS query domain"),
+    is_anomaly: Optional[bool] = Query(None, description="Filter by anomaly flag"),
     time_range: Optional[str] = Query(
         None, description="Filter by time range (format: start_iso,end_iso)"
     ),
@@ -53,13 +61,19 @@ async def search(
             end_time = parts[1] if parts[1] else None
 
     results = await es_service.search_packets(
+        case_id=case_id,
         source_ip=source_ip,
         destination_ip=destination_ip,
+        source_port=source_port,
+        destination_port=destination_port,
         protocol=protocol,
         start_time=start_time,
         end_time=end_time,
         http_user_agent=user_agent,
+        http_host=http_host,
+        tls_sni=tls_sni,
         dns_query=dns_query,
+        is_anomaly=is_anomaly,
         size=size,
         from_=from_,
     )
