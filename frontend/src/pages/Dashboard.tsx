@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+
+import { apiFetch } from "../api/client";
 import {
 	LineChart,
 	Line,
@@ -24,8 +26,6 @@ const COLORS = [
 	"#06b6d4",
 ];
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-
 const Dashboard: React.FC = () => {
 	const [throughput, setThroughput] = useState([]);
 	const [protocols, setProtocols] = useState([]);
@@ -35,9 +35,9 @@ const Dashboard: React.FC = () => {
 	const fetchData = async () => {
 		try {
 			const [tRes, pRes, sRes] = await Promise.all([
-				fetch(`${BASE_URL}/stats/throughput`),
-				fetch(`${BASE_URL}/stats/protocols`),
-				fetch(`${BASE_URL}/stats/top-talkers`),
+				apiFetch(`/stats/throughput`),
+				apiFetch(`/stats/protocols`),
+				apiFetch(`/stats/top-talkers`),
 			]);
 
 			setThroughput(await tRes.json());

@@ -1,9 +1,15 @@
-import uuid
+import hashlib
+import json
 import logging
+import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+
+from app.core.database import get_db_conn
+from app.dependencies.auth import require_case_access, require_role
+from app.schemas.auth import UserContext
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -31,9 +37,10 @@ class SizeLimitExceeded(Exception):
 
 
 def save_file_sync(source_file, target_path: Path):
-    """Synchronous helper function to write the file stream with size tracking."""
+    """Synchronous helper function to write the file stream with size tracking and hash calculation."""
     bytes_written = 0
     chunk_size = 1024 * 1024  # 1MB chunks
+    hasher = hashlib.sha256()
     with open(target_path, "wb") as buffer:
         while True:
             chunk = source_file.read(chunk_size)
@@ -43,75 +50,151 @@ def save_file_sync(source_file, target_path: Path):
             if bytes_written > MAX_UPLOAD_SIZE:
                 raise SizeLimitExceeded()
             buffer.write(chunk)
+            hasher.update(chunk)
+    return bytes_written, hasher.hexdigest()
 
 
-@router.post("/")
-async def upload_pcap(file: UploadFile = File(...)):
-    # 1. Filename Guard and Case-Insensitive Extension Check
-    if not file.filename:
-        raise HTTPException(
-            status_code=400, detail="Invalid request. Filename is missing."
-        )
-
-    filename_lower = file.filename.lower()
-    if not filename_lower.endswith((".pcap", ".pcapng")):
-        raise HTTPException(
-            status_code=400, detail="Invalid file type. Only PCAP files are allowed."
-        )
-
-    # 2. Content Signature (Magic Number) Validation
+@router.post("/{case_id}")
+async def upload_pcap(
+    case_id: str,
+    file: UploadFile = File(...),
+    current_user: UserContext = Depends(require_role("admin", "investigator")),
+):
+    conn = None
     try:
-        header = await file.read(4)
-        await file.seek(
-            0
-        )  # Rewind pointer back to start so chunk copying starts from the beginning
-    except Exception:
-        raise HTTPException(
-            status_code=400, detail="Failed to read file header for validation."
-        )
+        conn = get_db_conn()
+        require_case_access(conn, current_user, case_id, write=True)
 
-    if len(header) < 4 or header not in PCAP_MAGIC_NUMBERS:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file content. File does not match PCAP/PCAPNG format signature.",
-        )
+        # 1. Filename Guard and Case-Insensitive Extension Check
+        if not file.filename:
+            raise HTTPException(
+                status_code=400, detail="Invalid request. Filename is missing."
+            )
 
-    # 3. Path Traversal & Name Collision Protections
-    sanitized_name = Path(file.filename).name
-    unique_filename = f"{uuid.uuid4()}_{sanitized_name}"
-    file_path = (UPLOAD_DIR / unique_filename).resolve()
+        sanitized_name = Path(file.filename).name
+        filename_lower = sanitized_name.lower()
+        if not filename_lower.endswith((".pcap", ".pcapng")):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file type. Only PCAP files are allowed.",
+            )
 
-    # Verify that the resolved absolute path is strictly a descendant of UPLOAD_DIR
-    if UPLOAD_DIR not in file_path.parents:
-        raise HTTPException(status_code=400, detail="Path traversal attempt detected.")
+        # 2. Content Signature (Magic Number) Validation
+        try:
+            header = await file.read(4)
+            await file.seek(
+                0
+            )  # Rewind pointer back to start so chunk copying starts from the beginning
+        except Exception:
+            raise HTTPException(
+                status_code=400, detail="Failed to read file header for validation."
+            )
 
-    # 4. Offload Blocking File Write to Thread Pool
-    try:
-        await run_in_threadpool(save_file_sync, file.file, file_path)
-    except SizeLimitExceeded:
-        if file_path.exists():
-            try:
+        if len(header) < 4 or header not in PCAP_MAGIC_NUMBERS:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file content. File does not match PCAP/PCAPNG format signature.",
+            )
+
+        # 3. Path Traversal & Name Collision Protections
+        unique_filename = f"{uuid.uuid4()}_{sanitized_name}"
+        file_path = (UPLOAD_DIR / unique_filename).resolve()
+
+        # Verify that the resolved absolute path is strictly a descendant of UPLOAD_DIR
+        if UPLOAD_DIR not in file_path.parents:
+            raise HTTPException(
+                status_code=400, detail="Path traversal attempt detected."
+            )
+
+        # 4. Offload Blocking File Write and Hashing to Thread Pool
+        try:
+            size, sha256 = await run_in_threadpool(save_file_sync, file.file, file_path)
+        except SizeLimitExceeded:
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                except Exception:
+                    logger.exception(f"Failed to cleanup file {file_path}")
+            raise HTTPException(
+                status_code=413,
+                detail="File size exceeds the maximum limit of 100 MB.",
+            ) from None
+        except Exception as e:
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                except Exception:
+                    logger.exception(f"Failed to cleanup file {file_path}")
+            raise HTTPException(
+                status_code=500,
+                detail="An error occurred while saving the uploaded file on the server.",
+            ) from e
+
+        # 5. Database Persistence
+        try:
+            with conn.cursor() as cur:
+                # Check for duplicate SHA256 in the same case
+                cur.execute(
+                    "SELECT id FROM evidence_files WHERE case_id = %s AND sha256 = %s",
+                    (case_id, sha256),
+                )
+                if cur.fetchone():
+                    if file_path.exists():
+                        file_path.unlink()
+                    raise HTTPException(
+                        status_code=409,
+                        detail="A file with this content has already been uploaded to this case.",
+                    )
+
+                cur.execute(
+                    """
+                    INSERT INTO evidence_files (case_id, original_filename, object_key, sha256, byte_size, status, uploaded_by)
+                    VALUES (%s, %s, %s, %s, %s, 'registered', %s)
+                    RETURNING id
+                    """,
+                    (
+                        case_id,
+                        sanitized_name,
+                        str(file_path),
+                        sha256,
+                        size,
+                        current_user.id,
+                    ),
+                )
+                evidence_id = cur.fetchone()[0]
+
+                # Log custody event
+                cur.execute(
+                    """
+                    INSERT INTO custody_events (case_id, evidence_id, actor_id, action, details)
+                    VALUES (%s, %s, %s, 'upload', %s)
+                    """,
+                    (
+                        case_id,
+                        evidence_id,
+                        current_user.id,
+                        json.dumps({"filename": sanitized_name}),
+                    ),
+                )
+                conn.commit()
+
+            return {
+                "id": str(evidence_id),
+                "filename": sanitized_name,
+                "status": "registered",
+                "sha256": sha256,
+                "size": size,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            conn.rollback()
+            if file_path.exists():
                 file_path.unlink()
-            except Exception:
-                logger.exception(f"Failed to cleanup file {file_path}")
-        raise HTTPException(
-            status_code=413,
-            detail="File size exceeds the maximum limit of 100 MB.",
-        ) from None
-    except Exception as e:
-        if file_path.exists():
-            try:
-                file_path.unlink()
-            except Exception:
-                logger.exception(f"Failed to cleanup file {file_path}")
-        raise HTTPException(
-            status_code=500,
-            detail="An error occurred while saving the uploaded file on the server.",
-        ) from e
+            raise HTTPException(
+                status_code=500, detail=f"Database error: {str(e)}"
+            ) from e
 
-    # Return relative path component to preserve security and internal server structures
-    return {
-        "filename": file.filename,
-        "status": "uploaded",
-        "path": f"uploads/{unique_filename}",
-    }
+    finally:
+        if conn is not None:
+            conn.close()

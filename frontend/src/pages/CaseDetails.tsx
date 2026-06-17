@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Shield, Clock, HardDrive, ArrowLeft } from "lucide-react";
 
+import { apiFetch } from "../api/client";
+
 interface Evidence {
 	id: string;
 	original_filename: string;
@@ -33,8 +35,6 @@ interface CaseDetailsData {
 	custody_logs: CustodyLog[];
 }
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-
 const CaseDetails: React.FC = () => {
 	const { caseId } = useParams<{ caseId: string }>();
 	const [data, setData] = useState<CaseDetailsData | null>(null);
@@ -44,7 +44,7 @@ const CaseDetails: React.FC = () => {
 	useEffect(() => {
 		if (!caseId) return;
 
-		fetch(`${BASE_URL}/cases/${caseId}/details`)
+		apiFetch(`/cases/${caseId}/details`)
 			.then((res) => {
 				if (!res.ok) throw new Error("Failed to fetch case details");
 				return res.json();
@@ -135,47 +135,51 @@ const CaseDetails: React.FC = () => {
 						<HardDrive size={20} /> Evidence Files
 					</h3>
 				</div>
-				<table>
-					<thead>
-						<tr>
-							<th>Filename</th>
-							<th>Size</th>
-							<th>Status</th>
-							<th>Uploaded At</th>
-							<th>SHA-256 Hash</th>
-						</tr>
-					</thead>
-					<tbody>
-						{evidence.length === 0 ? (
+				<div className="table-responsive">
+					<table>
+						<thead>
 							<tr>
-								<td colSpan={5} style={{ textAlign: "center" }}>
-									No evidence files associated.
-								</td>
+								<th>Filename</th>
+								<th>Size</th>
+								<th>Status</th>
+								<th>Uploaded At</th>
+								<th>SHA-256 Hash</th>
 							</tr>
-						) : (
-							evidence.map((ev) => (
-								<tr key={ev.id}>
-									<td style={{ fontWeight: 600 }}>{ev.original_filename}</td>
-									<td>{(ev.byte_size / (1024 * 1024)).toFixed(2)} MB</td>
-									<td>
-										<span className={`status-badge status-${ev.status}`}>
-											{ev.status}
-										</span>
-									</td>
-									<td>{new Date(ev.uploaded_at).toLocaleString()}</td>
-									<td
-										style={{
-											fontSize: "0.7rem",
-											color: "var(--text-secondary)",
-										}}
-									>
-										{ev.sha256}
+						</thead>
+						<tbody>
+							{evidence.length === 0 ? (
+								<tr>
+									<td colSpan={5} style={{ textAlign: "center" }}>
+										No evidence files associated.
 									</td>
 								</tr>
-							))
-						)}
-					</tbody>
-				</table>
+							) : (
+								evidence.map((ev) => (
+									<tr key={ev.id}>
+										<td style={{ fontWeight: 600 }}>{ev.original_filename}</td>
+										<td>{(ev.byte_size / (1024 * 1024)).toFixed(2)} MB</td>
+										<td>
+											<span className={`status-badge status-${ev.status}`}>
+												{ev.status}
+											</span>
+										</td>
+										<td>{new Date(ev.uploaded_at).toLocaleString()}</td>
+										<td
+											className="text-break"
+											style={{
+												fontSize: "0.7rem",
+												color: "var(--text-secondary)",
+												minWidth: "200px",
+											}}
+										>
+											{ev.sha256}
+										</td>
+									</tr>
+								))
+							)}
+						</tbody>
+					</table>
+				</div>
 			</div>
 
 			{/* Chain of Custody Audit Logs */}
@@ -224,9 +228,13 @@ const CaseDetails: React.FC = () => {
 											{new Date(log.occurred_at).toLocaleString()}
 										</span>
 									</div>
-									<div className="timeline-details">
-										<span>Actor: {log.actor_name || "System"}</span>
-										<span>Details: {JSON.stringify(log.details)}</span>
+									<div className="timeline-details" style={{ display: "block" }}>
+										<div>
+											<strong>Actor:</strong> {log.actor_name || "System"}
+										</div>
+										<div className="text-break" style={{ marginTop: "0.5rem" }}>
+											<strong>Details:</strong> {JSON.stringify(log.details)}
+										</div>
 									</div>
 								</div>
 							</div>

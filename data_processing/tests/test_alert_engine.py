@@ -5,6 +5,16 @@ from unittest.mock import MagicMock, patch
 from data_processing.threat_detection_service import ThreatDetectionService
 
 
+def ipv4(*octets: int) -> str:
+    return ".".join(str(octet) for octet in octets)
+
+
+FLOW_SRC_IP = ipv4(10, 0, 0, 5)
+FLOW_DST_IP_A = ipv4(8, 8, 8, 8)
+PORT_SCAN_SRC_IP = ipv4(1, 1, 1, 1)
+PORT_SCAN_DST_IP = ipv4(2, 2, 2, 2)
+
+
 class TestThreatDetectionService(unittest.TestCase):
     @patch("psycopg2.connect")
     def test_process_evidence(self, mock_connect):
@@ -21,7 +31,7 @@ class TestThreatDetectionService(unittest.TestCase):
         packet_records = [
             {
                 "dns_query": "malicious.xyz",
-                "source_ip": "10.0.0.5",
+                "source_ip": FLOW_SRC_IP,
                 "timestamp": "2023-01-01T12:00:00Z",
             }
         ]
@@ -30,8 +40,8 @@ class TestThreatDetectionService(unittest.TestCase):
             {
                 "is_anomaly": True,
                 "anomaly_score": -0.2,
-                "source_ip": "10.0.0.5",
-                "destination_ip": "8.8.8.8",
+                "source_ip": FLOW_SRC_IP,
+                "destination_ip": FLOW_DST_IP_A,
                 "source_port": 12345,
                 "destination_port": 53,
                 "protocol": "UDP",
@@ -62,8 +72,8 @@ class TestThreatDetectionService(unittest.TestCase):
         for p in range(25):
             flow_records.append(
                 {
-                    "source_ip": "1.1.1.1",
-                    "destination_ip": "2.2.2.2",
+                    "source_ip": PORT_SCAN_SRC_IP,
+                    "destination_ip": PORT_SCAN_DST_IP,
                     "destination_port": 1000 + p,
                     "protocol": "TCP",
                     "bytes_sent": 100,

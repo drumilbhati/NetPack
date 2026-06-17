@@ -8,6 +8,7 @@ import {
 
 import { searchPackets } from "../api/search";
 import { type SearchResult } from "../types";
+import JsonView from "../components/JsonView";
 
 type FilterState = {
 	caseId: string;
@@ -197,13 +198,13 @@ const Search: React.FC = () => {
 				>
 					<SearchIcon size={20} /> Advanced Forensic Search
 				</h3>
-				<form onSubmit={handleSubmit}>
+				<form onSubmit={handleSubmit} style={{ marginTop: "1rem" }}>
 					<div
 						style={{
 							display: "grid",
-							gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-							gap: "1rem",
-							marginBottom: "1rem",
+							gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+							gap: "1rem 1.5rem",
+							marginBottom: "1.5rem",
 						}}
 					>
 						{[
@@ -264,14 +265,16 @@ const Search: React.FC = () => {
 									setFilters((prev) => ({ ...prev, tlsSni: value })),
 							},
 						].map((field) => (
-							<div key={field.label}>
+							<div key={field.label} style={{ maxWidth: "300px" }}>
 								<label
 									style={{
-										fontSize: "0.75rem",
+										fontSize: "0.7rem",
 										fontWeight: 700,
+										color: "var(--text-secondary)",
 										textTransform: "uppercase",
 										display: "block",
-										marginBottom: "0.35rem",
+										marginBottom: "0.4rem",
+										letterSpacing: "0.025em"
 									}}
 								>
 									{field.label}
@@ -279,28 +282,30 @@ const Search: React.FC = () => {
 								<input
 									type={field.inputType ?? "text"}
 									className="search-input"
-									style={{ width: "100%" }}
+									style={{ width: "100%", height: "34px", fontSize: "0.85rem" }}
 									value={field.value}
 									onChange={(event) => field.setter(event.target.value)}
 								/>
 							</div>
 						))}
 
-						<div>
+						<div style={{ maxWidth: "300px" }}>
 							<label
 								style={{
-									fontSize: "0.75rem",
+									fontSize: "0.7rem",
 									fontWeight: 700,
+									color: "var(--text-secondary)",
 									textTransform: "uppercase",
 									display: "block",
-									marginBottom: "0.35rem",
+									marginBottom: "0.4rem",
+									letterSpacing: "0.025em"
 								}}
 							>
 								Protocol
 							</label>
 							<select
 								className="select-input"
-								style={{ width: "100%" }}
+								style={{ width: "100%", height: "34px", fontSize: "0.85rem" }}
 								value={filters.protocol}
 								onChange={(event) =>
 									setFilters((prev) => ({
@@ -317,14 +322,16 @@ const Search: React.FC = () => {
 							</select>
 						</div>
 
-						<div>
+						<div style={{ maxWidth: "300px" }}>
 							<label
 								style={{
-									fontSize: "0.75rem",
+									fontSize: "0.7rem",
 									fontWeight: 700,
+									color: "var(--text-secondary)",
 									textTransform: "uppercase",
 									display: "block",
-									marginBottom: "0.35rem",
+									marginBottom: "0.4rem",
+									letterSpacing: "0.025em"
 								}}
 							>
 								Start Time
@@ -332,7 +339,7 @@ const Search: React.FC = () => {
 							<input
 								type="datetime-local"
 								className="search-input"
-								style={{ width: "100%" }}
+								style={{ width: "100%", height: "34px", fontSize: "0.85rem" }}
 								value={filters.startTime}
 								onChange={(event) =>
 									setFilters((prev) => ({
@@ -343,14 +350,16 @@ const Search: React.FC = () => {
 							/>
 						</div>
 
-						<div>
+						<div style={{ maxWidth: "300px" }}>
 							<label
 								style={{
-									fontSize: "0.75rem",
+									fontSize: "0.7rem",
 									fontWeight: 700,
+									color: "var(--text-secondary)",
 									textTransform: "uppercase",
 									display: "block",
-									marginBottom: "0.35rem",
+									marginBottom: "0.4rem",
+									letterSpacing: "0.025em"
 								}}
 							>
 								End Time
@@ -358,7 +367,7 @@ const Search: React.FC = () => {
 							<input
 								type="datetime-local"
 								className="search-input"
-								style={{ width: "100%" }}
+								style={{ width: "100%", height: "34px", fontSize: "0.85rem" }}
 								value={filters.endTime}
 								onChange={(event) =>
 									setFilters((prev) => ({
@@ -369,7 +378,7 @@ const Search: React.FC = () => {
 							/>
 						</div>
 
-						<div style={{ display: "flex", alignItems: "end" }}>
+						<div style={{ display: "flex", alignItems: "flex-end", paddingBottom: "6px" }}>
 							<label
 								style={{
 									display: "flex",
@@ -380,6 +389,7 @@ const Search: React.FC = () => {
 							>
 								<input
 									type="checkbox"
+									style={{ width: "16px", height: "16px" }}
 									checked={filters.anomalyOnly}
 									onChange={(event) =>
 										setFilters((prev) => ({
@@ -388,7 +398,7 @@ const Search: React.FC = () => {
 										}))
 									}
 								/>
-								<span style={{ fontSize: "0.875rem", fontWeight: 600 }}>
+								<span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-color)" }}>
 									Anomaly only
 								</span>
 							</label>
@@ -396,7 +406,13 @@ const Search: React.FC = () => {
 					</div>
 
 					<div
-						style={{ display: "flex", justifyContent: "flex-end", gap: "1rem" }}
+						style={{ 
+							display: "flex", 
+							justifyContent: "flex-end", 
+							gap: "1rem",
+							paddingTop: "0.75rem",
+							borderTop: "1px solid var(--border-color)"
+						}}
 					>
 						<button
 							type="button"
@@ -416,232 +432,230 @@ const Search: React.FC = () => {
 			{error && <div className="card text-red-500">Error: {error}</div>}
 
 			<div className="card" style={{ padding: 0 }}>
-				<table style={{ tableLayout: "fixed" }}>
-					<thead>
-						<tr>
-							<th style={{ width: "40px" }} />
-							<th style={{ width: "180px" }}>Timestamp</th>
-							<th style={{ width: "180px" }}>Case / Evidence</th>
-							<th>Source</th>
-							<th>Destination</th>
-							<th style={{ width: "90px" }}>Protocol</th>
-							<th>Signals</th>
-						</tr>
-					</thead>
-					<tbody>
-						{loading && results.length === 0 ? (
+				<div className="table-responsive">
+					<table style={{ tableLayout: "fixed", minWidth: "1200px" }}>
+						<thead>
 							<tr>
-								<td
-									colSpan={7}
-									style={{ textAlign: "center", padding: "3rem" }}
-								>
-									Loading search results...
-								</td>
+								<th style={{ width: "60px" }} />
+								<th style={{ width: "180px" }}>Timestamp</th>
+								<th style={{ width: "260px" }}>Case / Evidence</th>
+								<th style={{ width: "220px" }}>Source</th>
+								<th style={{ width: "220px" }}>Destination</th>
+								<th style={{ width: "100px" }}>Protocol</th>
+								<th>Signals</th>
 							</tr>
-						) : results.length === 0 ? (
-							<tr>
-								<td
-									colSpan={7}
-									style={{
-										textAlign: "center",
-										padding: "3rem",
-										color: "var(--text-secondary)",
-									}}
-								>
-									No records found. Adjust the filters above to search.
-								</td>
-							</tr>
-						) : (
-							results.map((result, index) => {
-								const rowKey = `${result.evidence_id ?? "evidence"}-${result.timestamp ?? index}-${index}`;
-								const isExpanded = expandedRow === index;
-								const tags = displaySignalTags(result);
-								const rowHighlight = result.is_anomaly
-									? "#fef2f2"
-									: "transparent";
+						</thead>
+						<tbody>
+							{loading && results.length === 0 ? (
+								<tr>
+									<td
+										colSpan={7}
+										style={{ textAlign: "center", padding: "3rem" }}
+									>
+										Loading search results...
+									</td>
+								</tr>
+							) : results.length === 0 ? (
+								<tr>
+									<td
+										colSpan={7}
+										style={{
+											textAlign: "center",
+											padding: "3rem",
+											color: "var(--text-secondary)",
+										}}
+									>
+										No records found. Adjust the filters above to search.
+									</td>
+								</tr>
+							) : (
+								results.map((result, index) => {
+									const rowKey = `${result.evidence_id ?? "evidence"}-${result.timestamp ?? index}-${index}`;
+									const isExpanded = expandedRow === index;
+									const tags = displaySignalTags(result);
+									const rowHighlight = result.is_anomaly
+										? "#fef2f2"
+										: "transparent";
 
-								return (
-									<React.Fragment key={rowKey}>
-										<tr
-											style={{
-												cursor: "pointer",
-												background: isExpanded ? "#f9fafb" : rowHighlight,
-											}}
-											onClick={() => setExpandedRow(isExpanded ? null : index)}
-										>
-											<td style={{ textAlign: "center" }}>
-												{isExpanded ? (
-													<ChevronUp size={16} />
-												) : (
-													<ChevronDown size={16} />
-												)}
-											</td>
-											<td style={{ fontSize: "0.75rem" }}>
-												{formatTimestamp(result.timestamp)}
-											</td>
-											<td style={{ fontSize: "0.8rem" }}>
-												<div style={{ fontWeight: 600 }}>
-													{result.case_id ?? "—"}
-												</div>
-												<div
-													style={{
-														color: "var(--text-secondary)",
-														fontSize: "0.75rem",
-													}}
-												>
-													{result.evidence_id ?? "No evidence ID"}
-												</div>
-											</td>
-											<td
+									return (
+										<React.Fragment key={rowKey}>
+											<tr
 												style={{
-													overflow: "hidden",
-													textOverflow: "ellipsis",
-													whiteSpace: "nowrap",
+													cursor: "pointer",
+													background: isExpanded ? "#f9fafb" : rowHighlight,
+													verticalAlign: "top"
+												}}
+												onClick={() => {
+													setExpandedRow(isExpanded ? null : index);
 												}}
 											>
-												{result.source_ip ?? "—"}
-												{result.source_port ? `:${result.source_port}` : ""}
-											</td>
-											<td
-												style={{
-													overflow: "hidden",
-													textOverflow: "ellipsis",
-													whiteSpace: "nowrap",
-												}}
-											>
-												{result.destination_ip ?? "—"}
-												{result.destination_port
-													? `:${result.destination_port}`
-													: ""}
-											</td>
-											<td>
-												<span
-													style={{
-														fontWeight: 700,
-														color: "var(--primary-color)",
-													}}
-												>
-													{result.protocol ?? "—"}
-												</span>
-											</td>
-											<td
-												style={{ overflow: "hidden", textOverflow: "ellipsis" }}
-											>
-												<div
-													style={{
-														display: "flex",
-														flexWrap: "wrap",
-														gap: "0.35rem",
-													}}
-												>
-													{tags.length > 0 ? (
-														tags.map((tag) => (
-															<span
-																key={`${rowKey}-${tag.label}`}
-																style={{
-																	background: `${tag.color}1A`,
-																	color: tag.color,
-																	padding: "0.15rem 0.4rem",
-																	borderRadius: "999px",
-																	fontSize: "0.7rem",
-																	fontWeight: 700,
-																}}
-															>
-																{tag.label}
-															</span>
-														))
+												<td style={{ textAlign: "center", padding: "1.25rem 0.5rem" }}>
+													{isExpanded ? (
+														<ChevronUp size={16} />
 													) : (
-														<span style={{ color: "var(--text-secondary)" }}>
-															No indicators
-														</span>
+														<ChevronDown size={16} />
 													)}
-												</div>
-											</td>
-										</tr>
-										{isExpanded && (
-											<tr>
+												</td>
+												<td style={{ fontSize: "0.75rem", padding: "1.25rem 1rem" }}>
+													{formatTimestamp(result.timestamp)}
+												</td>
+												<td style={{ padding: "1rem" }}>
+													<div className="text-truncate" style={{ fontWeight: 600, maxWidth: "220px" }} title={result.case_id}>
+														{result.case_id ?? "—"}
+													</div>
+													<div
+														className="text-truncate"
+														style={{
+															color: "var(--text-secondary)",
+															fontSize: "0.75rem",
+															maxWidth: "220px"
+														}}
+														title={result.evidence_id}
+													>
+														{result.evidence_id ?? "No evidence ID"}
+													</div>
+												</td>
 												<td
-													colSpan={7}
-													style={{ padding: "1.5rem", background: "#f9fafb" }}
+													style={{
+														overflow: "hidden",
+														textOverflow: "ellipsis",
+														whiteSpace: "nowrap",
+														padding: "1.25rem 1rem"
+													}}
+												>
+													{result.source_ip ?? "—"}
+													{result.source_port ? `:${result.source_port}` : ""}
+												</td>
+												<td
+													style={{
+														overflow: "hidden",
+														textOverflow: "ellipsis",
+														whiteSpace: "nowrap",
+														padding: "1.25rem 1rem"
+													}}
+												>
+													{result.destination_ip ?? "—"}
+													{result.destination_port
+														? `:${result.destination_port}`
+														: ""}
+												</td>
+												<td style={{ padding: "1.25rem 1rem" }}>
+													<span
+														style={{
+															fontWeight: 700,
+															color: "var(--primary-color)",
+														}}
+													>
+														{result.protocol ?? "—"}
+													</span>
+												</td>
+												<td
+													style={{ overflow: "hidden", textOverflow: "ellipsis", padding: "1rem" }}
 												>
 													<div
 														style={{
-															display: "grid",
-															gap: "1rem",
-															gridTemplateColumns: "1fr 1fr",
+															display: "flex",
+															flexWrap: "wrap",
+															gap: "0.35rem",
 														}}
 													>
-														<div>
-															<h4
-																style={{
-																	margin: "0 0 1rem 0",
-																	display: "flex",
-																	alignItems: "center",
-																	gap: "0.5rem",
-																}}
-															>
-																<Database size={16} /> Result Details
-															</h4>
-															<div
-																style={{
-																	display: "grid",
-																	gridTemplateColumns:
-																		"repeat(2, minmax(0, 1fr))",
-																	gap: "0.75rem",
-																}}
-															>
-																{detailRows(result).map(([label, value]) => (
-																	<div key={`${rowKey}-${label}`}>
-																		<div
-																			style={{
-																				fontSize: "0.7rem",
-																				color: "var(--text-secondary)",
-																				textTransform: "uppercase",
-																				fontWeight: 700,
-																			}}
-																		>
-																			{label}
-																		</div>
-																		<div
-																			style={{
-																				fontSize: "0.875rem",
-																				wordBreak: "break-word",
-																			}}
-																		>
-																			{value ?? "—"}
-																		</div>
-																	</div>
-																))}
-															</div>
-														</div>
-														<div>
-															<h4 style={{ margin: "0 0 1rem 0" }}>
-																Raw Metadata
-															</h4>
-															<pre
-																style={{
-																	background: "#1f2937",
-																	color: "#f3f4f6",
-																	padding: "1rem",
-																	borderRadius: "0.5rem",
-																	fontSize: "0.75rem",
-																	overflow: "auto",
-																	maxHeight: "320px",
-																}}
-															>
-																{JSON.stringify(result.metadata ?? {}, null, 2)}
-															</pre>
-														</div>
+														{tags.length > 0 ? (
+															tags.map((tag) => (
+																<span
+																	key={`${rowKey}-${tag.label}`}
+																	style={{
+																		background: `${tag.color}1A`,
+																		color: tag.color,
+																		padding: "0.15rem 0.4rem",
+																		borderRadius: "999px",
+																		fontSize: "0.7rem",
+																		fontWeight: 700,
+																	}}
+																>
+																	{tag.label}
+																</span>
+															))
+														) : (
+															<span style={{ color: "var(--text-secondary)" }}>
+																No indicators
+															</span>
+														)}
 													</div>
 												</td>
 											</tr>
-										)}
-									</React.Fragment>
-								);
-							})
-						)}
-					</tbody>
-				</table>
+											{isExpanded && (
+												<tr>
+													<td
+														colSpan={7}
+														style={{ padding: "1.5rem", background: "#f9fafb" }}
+													>
+														<div
+															style={{
+																display: "grid",
+																gap: "2rem",
+																gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+															}}
+														>
+															<div>
+																<h4
+																	style={{
+																		margin: "0 0 1rem 0",
+																		display: "flex",
+																		alignItems: "center",
+																		gap: "0.5rem",
+																	}}
+																>
+																	<Database size={16} /> Result Details
+																</h4>
+																<div
+																	style={{
+																		display: "grid",
+																		gridTemplateColumns:
+																			"repeat(auto-fit, minmax(140px, 1fr))",
+																		gap: "0.75rem",
+																	}}
+																>
+																	{detailRows(result).map(([label, value]) => (
+																		<div key={`${rowKey}-${label}`}>
+																			<div
+																				style={{
+																					fontSize: "0.7rem",
+																					color: "var(--text-secondary)",
+																					textTransform: "uppercase",
+																					fontWeight: 700,
+																				}}
+																			>
+																				{label}
+																			</div>
+																			<div
+																				className="text-break"
+																				style={{
+																					fontSize: "0.875rem",
+																				}}
+																			>
+																				{value ?? "—"}
+																			</div>
+																		</div>
+																	))}
+																</div>
+															</div>
+															<div style={{ minWidth: 0 }}>
+																<h4 style={{ margin: "0 0 1rem 0" }}>
+																	Raw Metadata
+																</h4>
+																<JsonView data={result.metadata ?? {}} maxHeight="320px" />
+															</div>
+														</div>
+													</td>
+												</tr>
+											)}
+										</React.Fragment>
+									);
+								})
+							)}
+						</tbody>
+					</table>
+				</div>
 
 				{results.length > 0 && (
 					<div

@@ -24,6 +24,16 @@ from data_processing.index_metadata import request_json
 from data_processing.ingestor import EvidenceIngestor
 
 
+def ipv4(*octets: int) -> str:
+    return ".".join(str(octet) for octet in octets)
+
+
+NORMAL_SRC_IP = ipv4(192, 168, 1, 10)
+NORMAL_DST_IP = ipv4(8, 8, 8, 8)
+ANOMALOUS_SRC_IP = ipv4(192, 168, 1, 50)
+ANOMALOUS_DST_IP = ipv4(99, 99, 99, 99)
+
+
 class TestAnomalyIntegration(unittest.TestCase):
     def setUp(self):
         self.db_url = os.environ.get(
@@ -82,7 +92,7 @@ class TestAnomalyIntegration(unittest.TestCase):
         for i in range(5):
             p = (
                 Ether()
-                / IP(src="192.168.1.10", dst="8.8.8.8")
+                / IP(src=NORMAL_SRC_IP, dst=NORMAL_DST_IP)
                 / TCP(sport=12345, dport=80)
                 / "Normal"
             )
@@ -92,7 +102,7 @@ class TestAnomalyIntegration(unittest.TestCase):
         for i in range(100):
             p = (
                 Ether()
-                / IP(src="192.168.1.50", dst="99.99.99.99")
+                / IP(src=ANOMALOUS_SRC_IP, dst=ANOMALOUS_DST_IP)
                 / TCP(sport=54321, dport=443)
                 / ("ANOMALY" * 100)
             )
@@ -138,7 +148,7 @@ class TestAnomalyIntegration(unittest.TestCase):
 
         # Verify that the exfiltration flow was flagged
         flagged_ips = [h["_source"]["destination_ip"] for h in hits]
-        self.assertIn("99.99.99.99", flagged_ips)
+        self.assertIn(ANOMALOUS_DST_IP, flagged_ips)
 
         # Verify that the normal flow was NOT flagged as anomaly
         query_normal = {
@@ -146,7 +156,7 @@ class TestAnomalyIntegration(unittest.TestCase):
                 "bool": {
                     "must": [
                         {"term": {"evidence_id": evidence_id}},
-                        {"term": {"destination_ip": "8.8.8.8"}},
+                        {"term": {"destination_ip": NORMAL_DST_IP}},
                         {"term": {"is_anomaly": True}},
                     ]
                 }

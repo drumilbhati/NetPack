@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { fetchCases } from "../api/cases";
+import { apiFetch, BASE_URL } from "../api/client";
 import { type Case } from "../types";
 import { FileText, Eye } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -16,14 +17,25 @@ const Cases: React.FC = () => {
 	const [uploadFile, setUploadFile] = useState<File | null>(null);
 	const [uploading, setUploading] = useState(false);
 
-	const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-
-	const handleDownloadReport = (caseId: string) => {
-		window.open(
-			`${baseUrl.replace(/\/$/, "")}/reports/${caseId}`,
-			"_blank",
-			"noopener,noreferrer",
-		);
+	const handleDownloadReport = async (caseId: string) => {
+		try {
+			const response = await apiFetch(`/reports/${caseId}`);
+			if (!response.ok) {
+				throw new Error("Failed to generate report");
+			}
+			const blob = await response.blob();
+			const url = window.URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = `NetPack_Report_${caseId}.pdf`;
+			document.body.appendChild(a);
+			a.click();
+			window.URL.revokeObjectURL(url);
+			document.body.removeChild(a);
+		} catch (err) {
+			console.error("Download failed:", err);
+			alert("Failed to download report. Please try again.");
+		}
 	};
 
 	const loadCases = () => {
@@ -46,17 +58,22 @@ const Cases: React.FC = () => {
 		setUploading(true);
 		try {
 			// 1. Create Case
-			await fetch(`${baseUrl}/cases/`, {
+			const caseRes = await apiFetch(`/cases/`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ title: newCaseTitle, description: newCaseDesc }),
 			});
+			
+			if (!caseRes.ok) {
+				throw new Error("Failed to create case");
+			}
+			const caseData = await caseRes.json();
 
-			// 2. Upload File (In a real app, this would associate with case_id)
+			// 2. Upload File associated with the new case_id
 			const formData = new FormData();
 			formData.append("file", uploadFile);
 
-			const uploadRes = await fetch(`${baseUrl}/upload/`, {
+			const uploadRes = await apiFetch(`/upload/${caseData.id}`, {
 				method: "POST",
 				body: formData,
 			});
@@ -67,6 +84,8 @@ const Cases: React.FC = () => {
 				setNewCaseDesc("");
 				setUploadFile(null);
 				loadCases();
+			} else {
+				throw new Error("Case created, but file upload failed");
 			}
 		} catch (err) {
 			console.error("Operation failed:", err);
@@ -215,77 +234,79 @@ const Cases: React.FC = () => {
 			)}
 
 			<div className="card" style={{ padding: 0 }}>
-				<table>
-					<thead>
-						<tr>
-							<th>ID</th>
-							<th>Title</th>
-							<th>Description</th>
-							<th>Created At</th>
-							<th>Actions</th>
-						</tr>
-					</thead>
-					<tbody>
-						{cases.length === 0 ? (
+				<div className="table-responsive">
+					<table>
+						<thead>
 							<tr>
-								<td
-									colSpan={5}
-									style={{
-										textAlign: "center",
-										color: "var(--text-secondary)",
-									}}
-								>
-									No cases found.
-								</td>
+								<th>ID</th>
+								<th>Title</th>
+								<th>Description</th>
+								<th>Created At</th>
+								<th>Actions</th>
 							</tr>
-						) : (
-							cases.map((caseItem) => (
-								<tr key={caseItem.id}>
-									<td title={caseItem.id}>{caseItem.id.substring(0, 8)}...</td>
-									<td style={{ fontWeight: 500 }}>{caseItem.title}</td>
-									<td>{caseItem.description}</td>
-									<td style={{ color: "var(--text-secondary)" }}>
-										{new Date(caseItem.created_at).toLocaleString()}
-									</td>
-									<td>
-										<div style={{ display: "flex", gap: "0.5rem" }}>
-											<Link
-												to={`/cases/${caseItem.id}`}
-												className="btn-primary"
-												style={{
-													padding: "0.25rem 0.75rem",
-													fontSize: "0.75rem",
-													display: "flex",
-													alignItems: "center",
-													gap: "0.5rem",
-													textDecoration: "none",
-												}}
-											>
-												<Eye size={14} />
-												Details
-											</Link>
-											<button
-												className="btn-primary"
-												style={{
-													padding: "0.25rem 0.75rem",
-													fontSize: "0.75rem",
-													display: "flex",
-													alignItems: "center",
-													gap: "0.5rem",
-													background: "var(--text-secondary)",
-												}}
-												onClick={() => handleDownloadReport(caseItem.id)}
-											>
-												<FileText size={14} />
-												Report
-											</button>
-										</div>
+						</thead>
+						<tbody>
+							{cases.length === 0 ? (
+								<tr>
+									<td
+										colSpan={5}
+										style={{
+											textAlign: "center",
+											color: "var(--text-secondary)",
+										}}
+									>
+										No cases found.
 									</td>
 								</tr>
-							))
-						)}
-					</tbody>
-				</table>
+							) : (
+								cases.map((caseItem) => (
+									<tr key={caseItem.id}>
+										<td title={caseItem.id}>{caseItem.id.substring(0, 8)}...</td>
+										<td className="text-truncate" style={{ fontWeight: 500, maxWidth: "200px" }}>{caseItem.title}</td>
+										<td className="text-truncate" style={{ maxWidth: "300px" }}>{caseItem.description}</td>
+										<td style={{ color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+											{new Date(caseItem.created_at).toLocaleString()}
+										</td>
+										<td>
+											<div style={{ display: "flex", gap: "0.5rem" }}>
+												<Link
+													to={`/cases/${caseItem.id}`}
+													className="btn-primary"
+													style={{
+														padding: "0.25rem 0.75rem",
+														fontSize: "0.75rem",
+														display: "flex",
+														alignItems: "center",
+														gap: "0.5rem",
+														textDecoration: "none",
+													}}
+												>
+													<Eye size={14} />
+													Details
+												</Link>
+												<button
+													className="btn-primary"
+													style={{
+														padding: "0.25rem 0.75rem",
+														fontSize: "0.75rem",
+														display: "flex",
+														alignItems: "center",
+														gap: "0.5rem",
+														background: "var(--text-secondary)",
+													}}
+													onClick={() => handleDownloadReport(caseItem.id)}
+												>
+													<FileText size={14} />
+													Report
+												</button>
+											</div>
+										</td>
+									</tr>
+								))
+							)}
+						</tbody>
+					</table>
+				</div>
 			</div>
 		</div>
 	);

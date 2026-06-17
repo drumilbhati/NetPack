@@ -11,6 +11,10 @@ INDEX_NAME = "netpack-flows"
 class ElasticsearchService:
     @staticmethod
     async def _request_json(method: str, path: str, body: Any = None) -> Any:
+        if not ELASTICSEARCH_URL:
+            raise HTTPException(
+                status_code=500, detail="ELASTICSEARCH_URL is not configured"
+            )
         url = f"{ELASTICSEARCH_URL.rstrip('/')}/{path}"
         headers = {"Accept": "application/json"}
         if body is not None:
@@ -36,6 +40,7 @@ class ElasticsearchService:
     async def search_packets(
         self,
         case_id: Optional[str] = None,
+        case_ids: Optional[List[str]] = None,
         source_ip: Optional[str] = None,
         destination_ip: Optional[str] = None,
         source_port: Optional[int] = None,
@@ -52,6 +57,9 @@ class ElasticsearchService:
         from_: int = 0,
     ) -> List[Dict[str, Any]]:
         filter_clauses: List[Dict[str, Any]] = []
+
+        if case_ids is not None and not case_ids:
+            return []
 
         def add_term(field: str, value: Any) -> None:
             if value is not None and value != "":
@@ -77,6 +85,8 @@ class ElasticsearchService:
             )
 
         add_term("case_id", case_id)
+        if case_ids is not None and case_ids:
+            filter_clauses.append({"terms": {"case_id": case_ids}})
         add_term("source_ip", source_ip)
         add_term("destination_ip", destination_ip)
         add_term("source_port", source_port)
@@ -115,11 +125,18 @@ class ElasticsearchService:
         return [hit["_source"] for hit in hits]
 
     async def get_recent_sessions(
-        self, case_id: Optional[str] = None, size: int = 50
+        self,
+        case_id: Optional[str] = None,
+        case_ids: Optional[List[str]] = None,
+        size: int = 50,
     ) -> List[Dict[str, Any]]:
+        if case_ids is not None and not case_ids:
+            return []
         query = {"match_all": {}}
         if case_id:
             query = {"term": {"case_id": case_id}}
+        elif case_ids is not None:
+            query = {"terms": {"case_id": case_ids}}
 
         body = {
             "query": query,
@@ -134,9 +151,16 @@ class ElasticsearchService:
         except Exception:
             return []
 
-    async def get_throughput_stats(self, interval: str = "1m") -> List[Dict[str, Any]]:
+    async def get_throughput_stats(
+        self, interval: str = "1m", case_ids: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        if case_ids is not None and not case_ids:
+            return []
         body = {
             "size": 0,
+            "query": {"terms": {"case_id": case_ids}}
+            if case_ids is not None
+            else {"match_all": {}},
             "aggs": {
                 "throughput": {
                     "date_histogram": {
@@ -161,8 +185,18 @@ class ElasticsearchService:
         except Exception:
             return []
 
-    async def get_protocol_stats(self) -> List[Dict[str, Any]]:
-        body = {"size": 0, "aggs": {"protocols": {"terms": {"field": "protocol"}}}}
+    async def get_protocol_stats(
+        self, case_ids: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        if case_ids is not None and not case_ids:
+            return []
+        body = {
+            "size": 0,
+            "query": {"terms": {"case_id": case_ids}}
+            if case_ids is not None
+            else {"match_all": {}},
+            "aggs": {"protocols": {"terms": {"field": "protocol"}}},
+        }
         try:
             response = await self._request_json("POST", f"{INDEX_NAME}/_search", body)
             buckets = (
@@ -172,9 +206,16 @@ class ElasticsearchService:
         except Exception:
             return []
 
-    async def get_top_talkers(self, size: int = 10) -> List[Dict[str, Any]]:
+    async def get_top_talkers(
+        self, size: int = 10, case_ids: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        if case_ids is not None and not case_ids:
+            return []
         body = {
             "size": 0,
+            "query": {"terms": {"case_id": case_ids}}
+            if case_ids is not None
+            else {"match_all": {}},
             "aggs": {
                 "top_talkers": {
                     "terms": {

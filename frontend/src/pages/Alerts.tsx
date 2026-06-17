@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { CheckCircle, XCircle, Eye } from "lucide-react";
 
+import { apiFetch } from "../api/client";
+
 interface Alert {
 	id: string;
 	title: string;
@@ -12,8 +14,6 @@ interface Alert {
 	flow_reference: any;
 }
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-
 const Alerts: React.FC = () => {
 	const [alerts, setAlerts] = useState<Alert[]>([]);
 	const [filterSeverity, setFilterSeverity] = useState("");
@@ -23,10 +23,10 @@ const Alerts: React.FC = () => {
 	const fetchAlerts = async () => {
 		setLoading(true);
 		try {
-			let url = `${BASE_URL}/alerts/?status=${filterStatus}`;
+			let url = `/alerts/?status=${filterStatus}`;
 			if (filterSeverity) url += `&severity=${filterSeverity}`;
 
-			const res = await fetch(url);
+			const res = await apiFetch(url);
 			const data = await res.json();
 			setAlerts(data);
 		} catch (err) {
@@ -42,7 +42,7 @@ const Alerts: React.FC = () => {
 
 	const updateStatus = async (alertId: string, newStatus: string) => {
 		try {
-			const res = await fetch(`${BASE_URL}/alerts/${alertId}/status`, {
+			const res = await apiFetch(`/alerts/${alertId}/status`, {
 				method: "PATCH",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ status: newStatus }),
@@ -100,12 +100,8 @@ const Alerts: React.FC = () => {
 				</div>
 			</div>
 
-			<div className="card">
-				{loading ? (
-					<p>Loading alerts...</p>
-				) : alerts.length === 0 ? (
-					<p>No alerts found matching the filters.</p>
-				) : (
+			<div className="card" style={{ padding: 0 }}>
+				<div className="table-responsive">
 					<table>
 						<thead>
 							<tr>
@@ -140,7 +136,7 @@ const Alerts: React.FC = () => {
 											{alert.status.replace("_", " ")}
 										</span>
 									</td>
-									<td>{new Date(alert.created_at).toLocaleString()}</td>
+									<td style={{ whiteSpace: "nowrap" }}>{new Date(alert.created_at).toLocaleString()}</td>
 									<td>
 										<div className="alert-actions">
 											{alert.status === "open" && (
@@ -183,7 +179,7 @@ const Alerts: React.FC = () => {
 							))}
 						</tbody>
 					</table>
-				)}
+				</div>
 			</div>
 		</div>
 	);

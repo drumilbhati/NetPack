@@ -6,6 +6,7 @@ class GraphNode(BaseModel):
     id: str
     label: str
     color: Optional[str] = "#2563eb"
+    val: float = 1.0  # Used for node sizing
 
 
 class GraphLink(BaseModel):

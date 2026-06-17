@@ -1,5 +1,5 @@
 import React from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
 	LayoutDashboard,
 	Briefcase,
@@ -9,8 +9,12 @@ import {
 	Bell,
 } from "lucide-react";
 
+import { useAuth } from "../auth/AuthContext";
+
 const Layout: React.FC = () => {
 	const location = useLocation();
+	const navigate = useNavigate();
+	const { user, logout } = useAuth();
 
 	const navigation = [
 		{ name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -49,7 +53,14 @@ const Layout: React.FC = () => {
 
 			{/* Main Content */}
 			<div className="main-content">
-				<header className="top-bar">
+				<header
+					className="top-bar"
+					style={{
+						display: "flex",
+						justifyContent: "space-between",
+						alignItems: "center",
+					}}
+				>
 					<h2>
 						{navigation.find(
 							(n) =>
@@ -57,6 +68,27 @@ const Layout: React.FC = () => {
 								n.href === location.pathname,
 						)?.name || "NetPack"}
 					</h2>
+					<div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+						<div style={{ textAlign: "right" }}>
+							<div style={{ fontSize: "0.875rem", fontWeight: 700 }}>
+								{user?.display_name}
+							</div>
+							<div
+								style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}
+							>
+								{user?.role}
+							</div>
+						</div>
+						<button
+							className="btn-primary btn-sm"
+							onClick={() => {
+								logout();
+								navigate("/login");
+							}}
+						>
+							Sign out
+						</button>
+					</div>
 				</header>
 				<main className="content-area">
 					<Outlet />

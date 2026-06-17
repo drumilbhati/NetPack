@@ -1,6 +1,5 @@
+import { apiFetch } from "./client";
 import { type SearchResult } from "../types";
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 export interface SearchParams {
 	case_id?: string;
@@ -31,7 +30,7 @@ export const searchPackets = async (
 		}
 	});
 
-	const response = await fetch(`${BASE_URL}/search/?${query.toString()}`);
+	const response = await apiFetch(`/search/?${query.toString()}`);
 	if (!response.ok) {
 		const errorData = await response.json().catch(() => ({}));
 		throw new Error(errorData.detail || "Failed to fetch search results");

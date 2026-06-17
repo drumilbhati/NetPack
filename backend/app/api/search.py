@@ -2,6 +2,13 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.core.database import get_db_conn
+from app.dependencies.auth import (
+    get_accessible_case_ids,
+    require_case_access,
+    require_role,
+)
+from app.schemas.auth import UserContext
 from app.schemas.search import PacketMetadata
 from app.services.elasticsearch import ElasticsearchService
 
@@ -38,6 +45,9 @@ async def search(
     ),
     size: int = Query(100, ge=1, le=10000, description="Number of results to return"),
     from_: int = Query(0, alias="from", ge=0, description="Offset for pagination"),
+    current_user: UserContext = Depends(
+        require_role("admin", "investigator", "auditor")
+    ),
     es_service: ElasticsearchService = Depends(ElasticsearchService),
 ):
     """
@@ -60,21 +70,31 @@ async def search(
         if len(parts) == 2:
             end_time = parts[1] if parts[1] else None
 
-    results = await es_service.search_packets(
-        case_id=case_id,
-        source_ip=source_ip,
-        destination_ip=destination_ip,
-        source_port=source_port,
-        destination_port=destination_port,
-        protocol=protocol,
-        start_time=start_time,
-        end_time=end_time,
-        http_user_agent=user_agent,
-        http_host=http_host,
-        tls_sni=tls_sni,
-        dns_query=dns_query,
-        is_anomaly=is_anomaly,
-        size=size,
-        from_=from_,
-    )
-    return results
+    conn = None
+    try:
+        conn = get_db_conn()
+        accessible_case_ids = get_accessible_case_ids(conn, current_user)
+        if case_id:
+            require_case_access(conn, current_user, case_id)
+        results = await es_service.search_packets(
+            case_id=case_id,
+            case_ids=None if case_id else accessible_case_ids,
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            source_port=source_port,
+            destination_port=destination_port,
+            protocol=protocol,
+            start_time=start_time,
+            end_time=end_time,
+            http_user_agent=user_agent,
+            http_host=http_host,
+            tls_sni=tls_sni,
+            dns_query=dns_query,
+            is_anomaly=is_anomaly,
+            size=size,
+            from_=from_,
+        )
+        return results
+    finally:
+        if conn is not None:
+            conn.close()

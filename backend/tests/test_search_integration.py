@@ -7,6 +7,16 @@ from app.main import app
 # Ensure we use the local ES
 os.environ["ELASTICSEARCH_URL"] = "http://localhost:9200"
 
+
+def ipv4(*octets: int) -> str:
+    return ".".join(str(octet) for octet in octets)
+
+
+SOURCE_IP = ipv4(10, 10, 1, 15)
+DEST_IP_A = ipv4(198, 51, 100, 25)
+DEST_IP_B = ipv4(8, 8, 8, 8)
+NO_MATCH_IP = ipv4(1, 2, 3, 4)
+
 class TestSearchIntegration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -35,22 +45,22 @@ class TestSearchIntegration(unittest.TestCase):
         test_data = [
             {
                 "timestamp": "2026-06-12T10:00:00Z",
-                "source_ip": "10.10.1.15",
-                "destination_ip": "198.51.100.25",
+                "source_ip": SOURCE_IP,
+                "destination_ip": DEST_IP_A,
                 "source_port": 49152,
                 "destination_port": 443,
                 "protocol": "TCP",
-                "metadata": {}
+                "metadata": {},
             },
             {
                 "timestamp": "2026-06-12T10:00:02Z",
-                "source_ip": "10.10.1.15",
-                "destination_ip": "8.8.8.8",
+                "source_ip": SOURCE_IP,
+                "destination_ip": DEST_IP_B,
                 "source_port": 53000,
                 "destination_port": 53,
                 "protocol": "UDP",
-                "metadata": {}
-            }
+                "metadata": {},
+            },
         ]
         
         with httpx.Client() as es_client:
@@ -83,13 +93,12 @@ class TestSearchIntegration(unittest.TestCase):
                 pass
 
     def test_search_real_ip(self):
-        # From seeded data: 10.10.1.15
-        response = self.client.get("/search?source_ip=10.10.1.15")
+        response = self.client.get(f"/search?source_ip={SOURCE_IP}")
         
         self.assertEqual(response.status_code, 200)
         results = response.json()
         self.assertEqual(len(results), 2)
-        self.assertEqual(results[0]["source_ip"], "10.10.1.15")
+        self.assertEqual(results[0]["source_ip"], SOURCE_IP)
 
     def test_search_protocol(self):
         response = self.client.get("/search?protocol=UDP")
@@ -100,14 +109,13 @@ class TestSearchIntegration(unittest.TestCase):
         self.assertEqual(results[0]["protocol"], "UDP")
 
     def test_search_no_results(self):
-        response = self.client.get("/search?source_ip=1.2.3.4")
+        response = self.client.get(f"/search?source_ip={NO_MATCH_IP}")
         
         self.assertEqual(response.status_code, 200)
         results = response.json()
         self.assertEqual(len(results), 0)
 
     def test_search_time_range(self):
-        # Range covering the sample timestamps (2026-06-12)
         response = self.client.get("/search?time_range=2026-06-12T00:00:00Z,2026-06-13T00:00:00Z")
         
         self.assertEqual(response.status_code, 200)

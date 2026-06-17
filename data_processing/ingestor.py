@@ -63,7 +63,7 @@ class EvidenceIngestor:
         self.s3_access_key = os.environ.get("S3_ACCESS_KEY")
         self.s3_secret_key = os.environ.get("S3_SECRET_KEY")
         self.bucket_name = os.environ.get("MINIO_EVIDENCE_BUCKET")
-        self.es_url = os.environ.get("ELASTICSEARCH_URL", "http://127.0.0.1:9200")
+        self.es_url = os.environ.get("ELASTICSEARCH_URL")
         self.es_index = os.environ.get("ELASTICSEARCH_INDEX", "netpack-flows")
 
         missing = [
@@ -74,6 +74,7 @@ class EvidenceIngestor:
                 "S3_ACCESS_KEY": self.s3_access_key,
                 "S3_SECRET_KEY": self.s3_secret_key,
                 "MINIO_EVIDENCE_BUCKET": self.bucket_name,
+                "ELASTICSEARCH_URL": self.es_url,
             }.items()
             if not val
         ]

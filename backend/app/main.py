@@ -1,7 +1,23 @@
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
-from app.api import alerts, cases, graph, reports, search, stats, timeline, uploads
+# Load environment variables from infra/.env
+env_path = Path(__file__).resolve().parents[2] / "infra" / ".env"
+load_dotenv(dotenv_path=env_path)
+
+from app.api import (
+    alerts,
+    auth,
+    cases,
+    graph,
+    reports,
+    search,
+    stats,
+    timeline,
+    uploads,
+)
 
 app = FastAPI(
     title="NetPack API",
@@ -19,6 +35,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(cases.router, prefix="/cases", tags=["cases"])
 app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 app.include_router(stats.router, prefix="/stats", tags=["stats"])

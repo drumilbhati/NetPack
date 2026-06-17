@@ -8,12 +8,22 @@ from scapy.layers.http import HTTPRequest
 from data_processing.dpi_engine import extract_packet_metadata
 
 
+def ipv4(*octets: int) -> str:
+    return ".".join(str(octet) for octet in octets)
+
+
+SRC_IP = ipv4(1, 2, 3, 4)
+DST_IP_A = ipv4(5, 6, 7, 8)
+DST_IP_B = ipv4(8, 8, 8, 8)
+PAIR_IP_A = ipv4(1, 1, 1, 1)
+PAIR_IP_B = ipv4(2, 2, 2, 2)
+
+
 class TestDPIEngine(unittest.TestCase):
     def test_extract_packet_metadata_http(self):
-        # Create a mock HTTP packet
         pkt = (
             Ether()
-            / IP(src="1.2.3.4", dst="5.6.7.8")
+            / IP(src=SRC_IP, dst=DST_IP_A)
             / TCP(sport=1234, dport=80)
             / HTTPRequest(Host=b"example.com", Path=b"/test", User_Agent=b"TestAgent")
         )
@@ -23,8 +33,8 @@ class TestDPIEngine(unittest.TestCase):
 
         self.assertEqual(len(results), 1)
         res = results[0]
-        self.assertEqual(res["source_ip"], "1.2.3.4")
-        self.assertEqual(res["destination_ip"], "5.6.7.8")
+        self.assertEqual(res["source_ip"], SRC_IP)
+        self.assertEqual(res["destination_ip"], DST_IP_A)
         self.assertEqual(res["http_url"], "http://example.com/test")
         self.assertEqual(res["http_user_agent"], "TestAgent")
         self.assertEqual(res["protocol"], "HTTP")
@@ -32,7 +42,7 @@ class TestDPIEngine(unittest.TestCase):
     def test_extract_packet_metadata_dns(self):
         pkt = (
             Ether()
-            / IP(src="1.2.3.4", dst="8.8.8.8")
+            / IP(src=SRC_IP, dst=DST_IP_B)
             / UDP(sport=1234, dport=53)
             / DNS(qr=0, qd=DNSQR(qname="Example.com."))
         )
@@ -48,7 +58,7 @@ class TestDPIEngine(unittest.TestCase):
     def test_extract_packet_metadata_ftp(self):
         pkt = (
             Ether()
-            / IP(src="1.2.3.4", dst="5.6.7.8")
+            / IP(src=SRC_IP, dst=DST_IP_A)
             / TCP(sport=1234, dport=21)
             / Raw(load=b"USER anonymous\r\n")
         )
@@ -64,7 +74,7 @@ class TestDPIEngine(unittest.TestCase):
     def test_extract_packet_metadata_smtp(self):
         pkt = (
             Ether()
-            / IP(src="1.2.3.4", dst="5.6.7.8")
+            / IP(src=SRC_IP, dst=DST_IP_A)
             / TCP(sport=1234, dport=25)
             / Raw(load=b"MAIL FROM:<test@example.com>\r\n")
         )
@@ -78,7 +88,7 @@ class TestDPIEngine(unittest.TestCase):
         self.assertEqual(res["smtp_command"], "MAIL FROM:<test@example.com>")
 
     def test_extract_packet_metadata_smb(self):
-        pkt = Ether() / IP(src="1.2.3.4", dst="5.6.7.8") / TCP(sport=1234, dport=445)
+        pkt = Ether() / IP(src=SRC_IP, dst=DST_IP_A) / TCP(sport=1234, dport=445)
         pkt.time = 1623845600.0
 
         results = extract_packet_metadata([pkt])
@@ -90,7 +100,7 @@ class TestDPIEngine(unittest.TestCase):
     def test_payload_signature_matching(self):
         pkt = (
             Ether()
-            / IP(src="1.2.3.4", dst="5.6.7.8")
+            / IP(src=SRC_IP, dst=DST_IP_A)
             / TCP(sport=1234, dport=80)
             / Raw(
                 load=b"POST /login HTTP/1.1\r\nHost: example.com\r\n\r\npassword=supersecret"
@@ -108,7 +118,7 @@ class TestDPIEngine(unittest.TestCase):
     def test_sql_injection_signature(self):
         pkt = (
             Ether()
-            / IP(src="1.2.3.4", dst="5.6.7.8")
+            / IP(src=SRC_IP, dst=DST_IP_A)
             / TCP(sport=1234, dport=80)
             / Raw(load=b"GET /search?id=1' union select null,null-- HTTP/1.1\r\n")
         )
@@ -125,15 +135,15 @@ class TestDPIEngine(unittest.TestCase):
 
         pkts = [
             Ether()
-            / IP(src="1.1.1.1", dst="2.2.2.2")
+            / IP(src=PAIR_IP_A, dst=PAIR_IP_B)
             / TCP(sport=1000, dport=80, seq=100)
             / Raw(load=b"GET / HTTP/1.1\r\n"),
             Ether()
-            / IP(src="2.2.2.2", dst="1.1.1.1")
+            / IP(src=PAIR_IP_B, dst=PAIR_IP_A)
             / TCP(sport=80, dport=1000, seq=500)
             / Raw(load=b"HTTP/1.1 200 OK\r\n"),
             Ether()
-            / IP(src="1.1.1.1", dst="2.2.2.2")
+            / IP(src=PAIR_IP_A, dst=PAIR_IP_B)
             / TCP(sport=1000, dport=80, seq=116)
             / Raw(load=b"Host: example.com\r\n\r\n"),
         ]
@@ -145,19 +155,19 @@ class TestDPIEngine(unittest.TestCase):
         self.assertEqual(len(streams), 1)
 
         # Check bidirectional content
-        stream_id = "1.1.1.1:1000 <-> 2.2.2.2:80"
+        stream_id = f"{PAIR_IP_A}:1000 <-> {PAIR_IP_B}:80"
         self.assertIn(stream_id, streams)
         directions = streams[stream_id]["directions"]
 
-        self.assertIn("1.1.1.1:1000 -> 2.2.2.2:80", directions)
-        self.assertIn("2.2.2.2:80 -> 1.1.1.1:1000", directions)
+        self.assertIn(f"{PAIR_IP_A}:1000 -> {PAIR_IP_B}:80", directions)
+        self.assertIn(f"{PAIR_IP_B}:80 -> {PAIR_IP_A}:1000", directions)
 
         self.assertEqual(
-            directions["1.1.1.1:1000 -> 2.2.2.2:80"],
+            directions[f"{PAIR_IP_A}:1000 -> {PAIR_IP_B}:80"],
             "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n",
         )
         self.assertEqual(
-            directions["2.2.2.2:80 -> 1.1.1.1:1000"], "HTTP/1.1 200 OK\r\n"
+            directions[f"{PAIR_IP_B}:80 -> {PAIR_IP_A}:1000"], "HTTP/1.1 200 OK\r\n"
         )
 
 
