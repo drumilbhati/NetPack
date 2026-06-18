@@ -18,6 +18,25 @@ A centralized platform for capturing, analyzing, and visualizing network traffic
 3. **Frontend:** Navigate to `frontend/`, run `npm install` and `npm run dev`.
 4. **Live Capture (Optional):** Run `python3 data_processing/live_capture.py --interface eth0 --case-id <UUID>` to start sniffing.
 
+## GitHub Pages (Frontend)
+- Frontend deployment is automated via `.github/workflows/deploy.yml` on pushes to `main`.
+- The Vite base path is configured for repository pages (`/NetPack/`) in `frontend/vite.config.ts`.
+- In GitHub repository settings, set **Pages source** to **GitHub Actions**.
+
+## GitHub Codespaces (Backend + ML + Infra)
+- Codespaces config is in `.devcontainer/devcontainer.json`.
+- On first create, dependencies are installed by `.devcontainer/postCreate.sh`.
+- On start, infra services (`postgres`, `minio`, `minio-init`, `elasticsearch`) are started by `.devcontainer/postStart.sh`.
+- You can manually start app services with:
+  - `bash scripts/start-all.sh`
+- Service ports forwarded in Codespaces:
+  - `5173` frontend
+  - `8000` backend
+  - `5432` postgres
+  - `9000` minio API
+  - `9001` minio console
+  - `9200` elasticsearch
+
 ## Documentation
 - [Problem Statement](./PROBLEM_STATEMENT.md)
 - [Solution Architecture](./SOLUTION_ARCHITECTURE.md)

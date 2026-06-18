@@ -1,0 +1,34 @@
+{
+  "name": "NetPack Codespace",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest"
+    }
+  },
+  "forwardPorts": [5173, 8000, 5432, 9000, 9001, 9200],
+  "portsAttributes": {
+    "5173": { "label": "Frontend (Vite)", "onAutoForward": "openBrowser" },
+    "8000": { "label": "Backend (FastAPI)", "onAutoForward": "openBrowser" },
+    "5432": { "label": "Postgres" },
+    "9000": { "label": "MinIO API" },
+    "9001": { "label": "MinIO Console" },
+    "9200": { "label": "Elasticsearch" }
+  },
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+  "postStartCommand": "bash .devcontainer/postStart.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-azuretools.vscode-docker",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  }
+}
