@@ -1,9 +1,22 @@
-.env
+# Ignore dependency directories
 node_modules/
+frontend/node_modules/
 venv/
 __pycache__/
-<<<<<<< HEAD
-.vite/
-=======
-.github/workflows/deploy.yml
->>>>>>> feature/report-generation
+*.pyc
+
+# Env and secrets
+.env
+*.env
+
+# Build and temp artifacts
+dist/
+build/
+tmp/
+temp/
+*.log
+
+# Ensure GitHub workflows are tracked
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
