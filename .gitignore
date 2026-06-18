@@ -2,4 +2,8 @@
 node_modules/
 venv/
 __pycache__/
+<<<<<<< HEAD
 .vite/
+=======
+.github/workflows/deploy.yml
+>>>>>>> feature/report-generation
