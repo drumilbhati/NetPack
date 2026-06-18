@@ -152,10 +152,14 @@ class ElasticsearchService:
             return []
 
     async def get_throughput_stats(
-        self, interval: str = "1m", case_ids: Optional[List[str]] = None
+        self, interval: str = "1d", case_ids: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         if case_ids is not None and not case_ids:
             return []
+        
+        # Determine dynamic interval based on the data we are querying.
+        # We default to 1d (daily) to handle 90-day datasets smoothly.
+        # If we need higher resolution later, we can pass it from the frontend.
         body = {
             "size": 0,
             "query": {"terms": {"case_id": case_ids}}
@@ -165,7 +169,7 @@ class ElasticsearchService:
                 "throughput": {
                     "date_histogram": {
                         "field": "timestamp",
-                        "fixed_interval": interval,
+                        "calendar_interval": interval,
                     },
                     "aggs": {
                         "bytes_sent": {"sum": {"field": "bytes_sent"}},
@@ -184,6 +188,7 @@ class ElasticsearchService:
             return buckets
         except Exception:
             return []
+
 
     async def get_protocol_stats(
         self, case_ids: Optional[List[str]] = None
@@ -237,3 +242,23 @@ class ElasticsearchService:
             return buckets
         except Exception:
             return []
+
+    async def get_active_case_ids(self) -> List[str]:
+        body = {
+            "size": 0,
+            "aggs": {
+                "unique_cases": {
+                    "terms": {
+                        "field": "case_id",
+                        "size": 1000
+                    }
+                }
+            }
+        }
+        try:
+            response = await self._request_json("POST", f"{INDEX_NAME}/_search", body)
+            buckets = response.get("aggregations", {}).get("unique_cases", {}).get("buckets", [])
+            return [b["key"] for b in buckets]
+        except Exception:
+            return []
+

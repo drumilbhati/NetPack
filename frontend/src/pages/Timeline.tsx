@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Loader from "../components/Loader";
 
 import { apiFetch } from "../api/client";
 import {
@@ -98,7 +99,7 @@ const Timeline: React.FC = () => {
 		return `${bytes} B`;
 	};
 
-	if (loading) return <div className="card">Loading temporal view...</div>;
+	if (loading) return <Loader message="Reconstructing TCP streams" />;
 	if (error) return <div className="card text-red-500">Error: {error}</div>;
 
 	return (

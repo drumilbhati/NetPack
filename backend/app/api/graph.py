@@ -4,7 +4,7 @@ from typing import Any, Dict, Tuple
 from fastapi import APIRouter, Depends
 
 from app.core.database import get_db_conn
-from app.dependencies.auth import get_accessible_case_ids, require_role
+from app.dependencies.auth import get_accessible_case_ids, get_filtered_case_ids, require_role
 from app.schemas.auth import UserContext
 from app.schemas.graph import GraphLink, GraphNode, GraphResponse
 from app.services.elasticsearch import ElasticsearchService
@@ -27,11 +27,11 @@ async def get_graph_data(
     conn = None
     try:
         conn = get_db_conn()
-        accessible_case_ids = get_accessible_case_ids(conn, current_user)
+        filtered_case_ids = await get_filtered_case_ids(conn, current_user, es_service)
 
         sessions = await es_service.get_recent_sessions(
-            case_ids=accessible_case_ids,
-            size=500,
+            case_ids=filtered_case_ids,
+            size=2000,
         )
 
         if not sessions:
@@ -65,6 +65,8 @@ async def get_graph_data(
 
         nodes = []
         max_bytes = max((s["bytes"] for s in node_stats.values()), default=1)
+        if max_bytes == 0:
+            max_bytes = 1
         
         for ip, stats in sorted(
             node_stats.items(),
@@ -85,7 +87,7 @@ async def get_graph_data(
 
         links = [
             GraphLink(source=source, target=target)
-            for (source, target), _count in link_counts.most_common(250)
+            for (source, target), _count in link_counts.most_common(1000)
         ]
 
         return GraphResponse(nodes=nodes, links=links)

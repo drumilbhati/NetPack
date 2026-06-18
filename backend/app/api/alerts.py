@@ -32,7 +32,6 @@ async def list_alerts(
     try:
         conn = get_db_conn()
         with conn.cursor() as cur:
-            accessible_case_ids = get_accessible_case_ids(conn, current_user)
             query = "SELECT * FROM alerts WHERE 1=1"
             params = []
 
@@ -40,12 +39,16 @@ async def list_alerts(
                 require_case_access(conn, current_user, case_id)
                 query += " AND case_id = %s"
                 params.append(case_id)
-            elif accessible_case_ids is not None:
-                if not accessible_case_ids:
-                    return []
-                placeholders = ",".join(["%s"] * len(accessible_case_ids))
-                query += f" AND case_id IN ({placeholders})"
-                params.extend(accessible_case_ids)
+            elif current_user.role not in ("admin", "auditor"):
+                query += """
+                     AND case_id IN (
+                         SELECT DISTINCT c.id
+                         FROM cases c
+                         LEFT JOIN case_members cm ON cm.case_id = c.id
+                         WHERE c.created_by = %s OR cm.user_id = %s
+                     )
+                """
+                params.extend([current_user.id, current_user.id])
             if status:
                 query += " AND status = %s"
                 params.append(status)
@@ -108,6 +111,18 @@ async def update_alert_status(
             conn.commit()
             updated_alert["created_at"] = updated_alert["created_at"].isoformat()
             updated_alert["updated_at"] = updated_alert["updated_at"].isoformat()
+
+            from app.core.audit import log_audit_event
+            log_audit_event(
+                conn,
+                current_user,
+                action="update_status",
+                target_type="alert",
+                target_id=alert_id,
+                case_id=str(alert_row["case_id"]),
+                metadata={"new_status": update.status}
+            )
+
             return updated_alert
     except Exception as e:
         if isinstance(e, HTTPException):

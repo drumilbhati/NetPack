@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Loader from "../components/Loader";
 
 import { apiFetch } from "../api/client";
 import {
@@ -56,28 +57,44 @@ const Dashboard: React.FC = () => {
 		return () => clearInterval(interval);
 	}, []);
 
-	if (loading) return <div className="card">Loading analytics...</div>;
+	if (loading) return <Loader message="Analyzing network traffic" />;
+
+	const formatTraffic = (val: number) => {
+		if (val === 0) return "0 B";
+		const k = 1024;
+		const sizes = ["B", "KB", "MB", "GB", "TB"];
+		const i = Math.floor(Math.log(val) / Math.log(k));
+		return `${parseFloat((val / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+	};
 
 	return (
 		<div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
 			{/* Throughput Chart */}
 			<div className="card">
-				<h3 style={{ marginTop: 0 }}>Traffic Throughput (Bytes/min)</h3>
+				<h3 style={{ marginTop: 0 }}>Traffic Throughput</h3>
 				<div style={{ height: 300, width: "100%" }}>
 					<ResponsiveContainer>
-						<LineChart data={throughput}>
+						<LineChart data={throughput} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
 							<CartesianGrid strokeDasharray="3 3" />
 							<XAxis
 								dataKey="timestamp"
+								tick={{ fontSize: 12 }}
 								tickFormatter={(ts) =>
-									new Date(ts).toLocaleTimeString([], {
-										hour: "2-digit",
-										minute: "2-digit",
+									new Date(ts).toLocaleDateString(undefined, {
+										month: "short",
+										day: "numeric",
 									})
 								}
 							/>
-							<YAxis tickFormatter={(val) => `${(val / 1024).toFixed(1)} KB`} />
-							<Tooltip labelFormatter={(ts) => new Date(ts).toLocaleString()} />
+							<YAxis 
+								width={85} 
+								tick={{ fontSize: 12 }} 
+								tickFormatter={formatTraffic} 
+							/>
+							<Tooltip 
+								labelFormatter={(ts) => new Date(ts).toLocaleString()} 
+								formatter={(val: any, name: any) => [formatTraffic(Number(val)), String(name)]}
+							/>
 							<Legend />
 							<Line
 								type="monotone"

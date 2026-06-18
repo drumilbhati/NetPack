@@ -34,17 +34,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(auth.router, prefix="/auth", tags=["auth"])
-app.include_router(cases.router, prefix="/cases", tags=["cases"])
-app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
-app.include_router(stats.router, prefix="/stats", tags=["stats"])
-app.include_router(uploads.router, prefix="/upload", tags=["uploads"])
-app.include_router(search.router, prefix="/search", tags=["search"])
-app.include_router(graph.router, prefix="/graph", tags=["graph"])
-app.include_router(timeline.router, prefix="/timeline", tags=["timeline"])
-
-app.include_router(reports.router, prefix="/reports", tags=["reports"])
+# Include routers with /api prefix
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(cases.router, prefix="/api/cases", tags=["cases"])
+app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
+app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
+app.include_router(uploads.router, prefix="/api/upload", tags=["uploads"])
+app.include_router(search.router, prefix="/api/search", tags=["search"])
+app.include_router(graph.router, prefix="/api/graph", tags=["graph"])
+app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"])
+app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 
 
 @app.get("/")
@@ -60,4 +59,5 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8000"))
 
+    # Force reload of data_processing modules (v2)
     uvicorn.run(app, host=host, port=port)

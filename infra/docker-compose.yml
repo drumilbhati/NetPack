@@ -86,7 +86,7 @@ services:
       - netpack
 
   kafka:
-    image: bitnami/kafka:3.7
+    image: bitnamilegacy/kafka:3.7
     container_name: netpack-kafka
     restart: unless-stopped
     profiles:
@@ -117,7 +117,7 @@ services:
       - netpack
 
   kafka-init:
-    image: bitnami/kafka:3.7
+    image: bitnamilegacy/kafka:3.7
     container_name: netpack-kafka-init
     profiles:
       - streaming

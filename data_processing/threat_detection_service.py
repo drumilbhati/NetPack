@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import uuid
 from typing import Any, Dict, List, Optional
@@ -12,6 +13,21 @@ class ThreatDetectionService:
         self.db_url = db_url or os.environ.get("DATABASE_URL")
         self.model_version = "1.0.0"
         self.rules_version = "1.0.0"
+
+        # Load signatures definitions to map matched signature names to severities and descriptions
+        self.signatures_by_name = {}
+        sig_path = os.path.join(
+            os.path.dirname(__file__), "rules", "signatures.json"
+        )
+        if os.path.exists(sig_path):
+            try:
+                with open(sig_path, "r") as f:
+                    sigs = json.load(f)
+                    for sig in sigs:
+                        self.signatures_by_name[sig["name"]] = sig
+                print(f"[+] ThreatDetectionService: Loaded {len(self.signatures_by_name)} signatures definitions from {sig_path}")
+            except Exception as e:
+                print(f"[-] ThreatDetectionService: Failed to load signatures definitions: {e}")
 
         # Load ML model if path provided
         self.ml_ready = False
@@ -78,6 +94,8 @@ class ThreatDetectionService:
                         else "medium",
                         "title": f"Anomalous Flow: {flow.get('source_ip')} -> {flow.get('destination_ip')}",
                         "explanation": {
+                            "reason": f"Isolation Forest anomaly detection model flagged this flow as suspicious. Feature vectors: anomaly_score = {flow.get('anomaly_score', 0):.4f} (contamination baseline 0.05). Sent {flow.get('bytes_sent', 0)} bytes, Received {flow.get('bytes_received', 0)} bytes, duration {flow.get('duration', 0):.2f}s, total packets {flow.get('packet_count', 0)}.",
+                            "confidence": round(min(1.0, max(0.5, 0.5 + abs(flow.get("anomaly_score", 0)))), 2),
                             "anomaly_score": flow.get("anomaly_score"),
                             "bytes_sent": flow.get("bytes_sent"),
                             "bytes_received": flow.get("bytes_received"),
@@ -125,7 +143,11 @@ class ThreatDetectionService:
                         "rule_or_model_version": self.rules_version,
                         "severity": "high",
                         "title": f"High Volume Transfer Detected: {flow.get('source_ip')}",
-                        "explanation": {"bytes_sent": flow.get("bytes_sent")},
+                        "explanation": {
+                            "reason": f"Data exfiltration warning: High volume transfer detected from host. Sent {flow.get('bytes_sent', 0) / (1024*1024):.2f} MB of data which exceeds the baseline threshold of 50 MB.",
+                            "confidence": 0.90,
+                            "bytes_sent": flow.get("bytes_sent")
+                        },
                         "flow_reference": {
                             "src_ip": flow.get("source_ip"),
                             "dst_ip": flow.get("destination_ip"),
@@ -151,6 +173,8 @@ class ThreatDetectionService:
                             "severity": "medium",
                             "title": f"Suspicious DNS Query: {dns_query}",
                             "explanation": {
+                                "reason": f"Suspicious DNS query domain suffix match: The query to domain '{dns_query}' resolves to a suspicious or untrusted Top-Level Domain (TLD).",
+                                "confidence": 0.85,
                                 "domain": dns_query,
                                 "client": pkt.get("source_ip"),
                             },
@@ -173,6 +197,8 @@ class ThreatDetectionService:
                             "severity": "high",
                             "title": f"Potential DNS Tunneling: {dns_query[:30]}...",
                             "explanation": {
+                                "reason": f"Potential DNS tunneling: Detected anomalous query length of {len(dns_query)} characters containing high entropy subdomain strings, typical of command-and-control (C2) encapsulation.",
+                                "confidence": 0.95,
                                 "query_length": len(dns_query),
                                 "query": dns_query,
                             },
@@ -194,7 +220,11 @@ class ThreatDetectionService:
                         "rule_or_model_version": self.rules_version,
                         "severity": "high",
                         "title": "Large ICMP Packet Detected (Potential Tunneling)",
-                        "explanation": {"packet_size": pkt.get("size")},
+                        "explanation": {
+                            "reason": f"ICMP tunneling anomaly: ICMP packet size of {pkt.get('size')} bytes exceeds the maximum expected payload size of 1000 bytes. Large ICMP packets are typically used to encapsulate non-ping traffic.",
+                            "confidence": 0.90,
+                            "packet_size": pkt.get("size")
+                        },
                         "flow_reference": {
                             "src_ip": pkt.get("source_ip"),
                             "dst_ip": pkt.get("destination_ip"),
@@ -217,6 +247,8 @@ class ThreatDetectionService:
                         "severity": "high",
                         "title": f"Suspicious User-Agent: {ua}",
                         "explanation": {
+                            "reason": f"Suspicious web crawler or automated tool User-Agent header detected in HTTP request: '{ua}'. Targeting url: '{pkt.get('http_url')}'",
+                            "confidence": 0.98,
                             "user_agent": ua,
                             "target": pkt.get("http_url"),
                         },
@@ -248,10 +280,46 @@ class ThreatDetectionService:
                         "rule_or_model_version": self.rules_version,
                         "severity": "medium",
                         "title": f"Potential Port Scan from {src}",
-                        "explanation": {"unique_ports_count": len(ports)},
+                        "explanation": {
+                            "reason": f"Port scanning heuristic trigger: Host attempted connections to {len(ports)} unique ports in a brief time-window, indicative of aggressive target profiling/scanning.",
+                            "confidence": 0.99,
+                            "unique_ports_count": len(ports)
+                        },
                         "flow_reference": {"src_ip": src},
                     }
                 )
+
+        # Rule 6: Payload Signatures matched by DPI engine
+        for pkt in packet_records:
+            matched_sigs = pkt.get("payload_signatures")
+            if matched_sigs:
+                for sig_name in matched_sigs:
+                    sig_def = self.signatures_by_name.get(sig_name, {})
+                    alerts.append(
+                        {
+                            **context,
+                            "source": "SIGNATURE",
+                            "rule_or_model_id": f"PAYLOAD_SIG_{sig_name.upper()}",
+                            "rule_or_model_version": self.rules_version,
+                            "severity": sig_def.get("severity", "medium"),
+                            "title": sig_def.get("description", f"Payload Signature Matched: {sig_name}"),
+                            "explanation": {
+                                "reason": f"Payload signature matched known pattern: {sig_def.get('description', sig_name)}. Matched regex pattern: '{sig_def.get('pattern')}' in raw packet payload.",
+                                "confidence": 0.99,
+                                "signature_name": sig_name,
+                                "matched_pattern": sig_def.get("pattern"),
+                                "packet_size": pkt.get("size"),
+                            },
+                            "flow_reference": {
+                                "src_ip": pkt.get("source_ip"),
+                                "dst_ip": pkt.get("destination_ip"),
+                                "src_port": pkt.get("source_port"),
+                                "dst_port": pkt.get("destination_port"),
+                                "proto": pkt.get("protocol"),
+                                "timestamp": pkt.get("timestamp"),
+                            },
+                        }
+                    )
 
         return alerts
 

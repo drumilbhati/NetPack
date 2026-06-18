@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.database import get_db_conn
 from app.dependencies.auth import (
     get_accessible_case_ids,
+    get_filtered_case_ids,
     require_case_access,
     require_role,
 )
@@ -73,12 +74,14 @@ async def search(
     conn = None
     try:
         conn = get_db_conn()
-        accessible_case_ids = get_accessible_case_ids(conn, current_user)
+        filtered_case_ids = None
         if case_id:
             require_case_access(conn, current_user, case_id)
+        else:
+            filtered_case_ids = await get_filtered_case_ids(conn, current_user, es_service)
         results = await es_service.search_packets(
             case_id=case_id,
-            case_ids=None if case_id else accessible_case_ids,
+            case_ids=filtered_case_ids,
             source_ip=source_ip,
             destination_ip=destination_ip,
             source_port=source_port,

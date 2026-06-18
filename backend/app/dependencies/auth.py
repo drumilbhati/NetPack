@@ -84,7 +84,7 @@ def require_role(*allowed_roles: str):
 
 
 def get_accessible_case_ids(conn, user: UserContext) -> Optional[List[str]]:
-    if user.role == "admin":
+    if user.role in ("admin", "auditor"):
         return None
 
     with conn.cursor() as cur:
@@ -111,7 +111,7 @@ def require_case_access(
             detail="You do not have permission to modify this case",
         )
 
-    if user.role == "admin":
+    if user.role in ("admin", "auditor"):
         return
 
     with conn.cursor() as cur:
@@ -130,3 +130,16 @@ def require_case_access(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have access to this case",
             )
+
+
+async def get_filtered_case_ids(
+    conn, user: UserContext, es_service: Any
+) -> Optional[List[str]]:
+    accessible_ids = get_accessible_case_ids(conn, user)
+    if accessible_ids is None:
+        return None
+
+    active_ids = await es_service.get_active_case_ids()
+    accessible_set = set(accessible_ids)
+    return [cid for cid in active_ids if cid in accessible_set]
+

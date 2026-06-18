@@ -1,0 +1,38 @@
+[
+  {
+    "name": "password_exposure",
+    "pattern": "(password|passwd|pwd|secret)\\s*[:=]\\s*(\\w+)",
+    "description": "Potential password exposure in cleartext payload",
+    "severity": "high"
+  },
+  {
+    "name": "sql_injection_attempt",
+    "pattern": "union\\s+select|drop\\s+table|select\\s+.*\\s+from\\s+information_schema",
+    "description": "Potential SQL injection attack pattern detected",
+    "severity": "critical"
+  },
+  {
+    "name": "private_key_exposure",
+    "pattern": "-----BEGIN (RSA|EC|DSA|OPENSSH)? PRIVATE KEY-----",
+    "description": "Private key file content detected in traffic",
+    "severity": "critical"
+  },
+  {
+    "name": "zip_archive_header",
+    "pattern": "PK\\x03\\x04",
+    "description": "ZIP archive file transfer detected",
+    "severity": "info"
+  },
+  {
+    "name": "executable_header",
+    "pattern": "MZ\\x90\\x00",
+    "description": "Windows executable (PE) file transfer detected",
+    "severity": "medium"
+  },
+  {
+    "name": "elf_header",
+    "pattern": "\\x7fELF",
+    "description": "Linux executable (ELF) file transfer detected",
+    "severity": "medium"
+  }
+]

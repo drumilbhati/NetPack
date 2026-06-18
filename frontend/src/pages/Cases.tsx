@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { fetchCases } from "../api/cases";
-import { apiFetch, BASE_URL } from "../api/client";
+import { apiFetch } from "../api/client";
 import { type Case } from "../types";
 import { FileText, Eye } from "lucide-react";
 import { Link } from "react-router-dom";
+import Loader from "../components/Loader";
 
 const Cases: React.FC = () => {
 	const [cases, setCases] = useState<Case[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [page, setPage] = useState(1);
 
 	// New State for case creation and upload
 	const [showModal, setShowModal] = useState(false);
@@ -38,9 +40,9 @@ const Cases: React.FC = () => {
 		}
 	};
 
-	const loadCases = () => {
+	const loadCases = (p: number = page) => {
 		setLoading(true);
-		fetchCases()
+		fetchCases(50, (p - 1) * 50)
 			.then((data) => {
 				setCases(data);
 				setLoading(false);
@@ -85,10 +87,12 @@ const Cases: React.FC = () => {
 				setUploadFile(null);
 				loadCases();
 			} else {
-				throw new Error("Case created, but file upload failed");
+				const errData = await uploadRes.json().catch(() => ({}));
+				throw new Error(errData.detail || "Case created, but file upload failed");
 			}
 		} catch (err) {
 			console.error("Operation failed:", err);
+			alert(err instanceof Error ? err.message : "An unexpected error occurred during upload.");
 		} finally {
 			setUploading(false);
 		}
@@ -99,11 +103,7 @@ const Cases: React.FC = () => {
 	}, []);
 
 	if (loading)
-		return (
-			<div style={{ textAlign: "center", padding: "2rem" }}>
-				Loading cases...
-			</div>
-		);
+		return <Loader message="Decrypting packets" />;
 	if (error)
 		return (
 			<div style={{ color: "red", textAlign: "center", padding: "2rem" }}>
@@ -224,8 +224,9 @@ const Cases: React.FC = () => {
 									type="submit"
 									className="btn-primary"
 									disabled={uploading}
+									style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
 								>
-									{uploading ? "Processing..." : "Start Investigation"}
+									{uploading ? <Loader inline message="Decrypting evidence" /> : "Start Investigation"}
 								</button>
 							</div>
 						</form>
@@ -306,6 +307,54 @@ const Cases: React.FC = () => {
 							)}
 						</tbody>
 					</table>
+				</div>
+				<div
+					style={{
+						display: "flex",
+						justifyContent: "space-between",
+						alignItems: "center",
+						padding: "1rem 1.5rem",
+						borderTop: "1px solid var(--border-color)",
+						background: "var(--background-card)"
+					}}
+				>
+					<button
+						className="btn-primary"
+						disabled={page === 1}
+						onClick={() => {
+							const newPage = page - 1;
+							setPage(newPage);
+							loadCases(newPage);
+						}}
+						style={{
+							padding: "0.4rem 0.8rem",
+							fontSize: "0.875rem",
+							backgroundColor: page === 1 ? "var(--border-color)" : "var(--primary-color)",
+							cursor: page === 1 ? "not-allowed" : "pointer"
+						}}
+					>
+						Previous
+					</button>
+					<span style={{ fontSize: "0.875rem", color: "var(--text-secondary)", fontWeight: 500 }}>
+						Page {page}
+					</span>
+					<button
+						className="btn-primary"
+						disabled={cases.length < 50}
+						onClick={() => {
+							const newPage = page + 1;
+							setPage(newPage);
+							loadCases(newPage);
+						}}
+						style={{
+							padding: "0.4rem 0.8rem",
+							fontSize: "0.875rem",
+							backgroundColor: cases.length < 50 ? "var(--border-color)" : "var(--primary-color)",
+							cursor: cases.length < 50 ? "not-allowed" : "pointer"
+						}}
+					>
+						Next
+					</button>
 				</div>
 			</div>
 		</div>

@@ -9,6 +9,7 @@ import {
 import { searchPackets } from "../api/search";
 import { type SearchResult } from "../types";
 import JsonView from "../components/JsonView";
+import Loader from "../components/Loader";
 
 type FilterState = {
 	caseId: string;
@@ -57,7 +58,7 @@ const protocolOptions = [
 	"ICMP",
 ];
 
-const Search: React.FC = () => {
+const SearchPage: React.FC = () => {
 	const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 	const [results, setResults] = useState<SearchResult[]>([]);
 	const [loading, setLoading] = useState(false);
@@ -165,19 +166,19 @@ const Search: React.FC = () => {
 		["Bytes Received", formatBytes(result.bytes_received)],
 		[
 			"Duration",
-			result.duration !== undefined ? `${result.duration.toFixed(3)}s` : "—",
+			result.duration !== undefined && result.duration !== null ? `${result.duration.toFixed(3)}s` : "—",
 		],
 		[
 			"Packet Count",
-			result.packet_count !== undefined ? String(result.packet_count) : "—",
+			result.packet_count !== undefined && result.packet_count !== null ? String(result.packet_count) : "—",
 		],
 		[
 			"Anomaly Score",
-			result.anomaly_score !== undefined ? String(result.anomaly_score) : "—",
+			result.anomaly_score !== undefined && result.anomaly_score !== null ? String(result.anomaly_score) : "—",
 		],
 		[
 			"Anomaly Flag",
-			result.is_anomaly === undefined
+			result.is_anomaly === undefined || result.is_anomaly === null
 				? "—"
 				: result.is_anomaly
 					? "true"
@@ -202,8 +203,8 @@ const Search: React.FC = () => {
 					<div
 						style={{
 							display: "grid",
-							gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-							gap: "1rem 1.5rem",
+							gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+							gap: "1rem 1rem",
 							marginBottom: "1.5rem",
 						}}
 					>
@@ -265,7 +266,7 @@ const Search: React.FC = () => {
 									setFilters((prev) => ({ ...prev, tlsSni: value })),
 							},
 						].map((field) => (
-							<div key={field.label} style={{ maxWidth: "300px" }}>
+							<div key={field.label}>
 								<label
 									style={{
 										fontSize: "0.7rem",
@@ -273,7 +274,7 @@ const Search: React.FC = () => {
 										color: "var(--text-secondary)",
 										textTransform: "uppercase",
 										display: "block",
-										marginBottom: "0.4rem",
+										marginBottom: "0.25rem",
 										letterSpacing: "0.025em"
 									}}
 								>
@@ -282,14 +283,14 @@ const Search: React.FC = () => {
 								<input
 									type={field.inputType ?? "text"}
 									className="search-input"
-									style={{ width: "100%", height: "34px", fontSize: "0.85rem" }}
+									style={{ width: "100%", padding: "0.4rem 0.5rem", fontSize: "0.8rem", boxSizing: "border-box" }}
 									value={field.value}
 									onChange={(event) => field.setter(event.target.value)}
 								/>
 							</div>
 						))}
 
-						<div style={{ maxWidth: "300px" }}>
+						<div>
 							<label
 								style={{
 									fontSize: "0.7rem",
@@ -297,7 +298,7 @@ const Search: React.FC = () => {
 									color: "var(--text-secondary)",
 									textTransform: "uppercase",
 									display: "block",
-									marginBottom: "0.4rem",
+									marginBottom: "0.25rem",
 									letterSpacing: "0.025em"
 								}}
 							>
@@ -305,7 +306,7 @@ const Search: React.FC = () => {
 							</label>
 							<select
 								className="select-input"
-								style={{ width: "100%", height: "34px", fontSize: "0.85rem" }}
+								style={{ width: "100%", padding: "0.4rem 0.5rem", fontSize: "0.8rem", boxSizing: "border-box" }}
 								value={filters.protocol}
 								onChange={(event) =>
 									setFilters((prev) => ({
@@ -322,7 +323,7 @@ const Search: React.FC = () => {
 							</select>
 						</div>
 
-						<div style={{ maxWidth: "300px" }}>
+						<div>
 							<label
 								style={{
 									fontSize: "0.7rem",
@@ -330,7 +331,7 @@ const Search: React.FC = () => {
 									color: "var(--text-secondary)",
 									textTransform: "uppercase",
 									display: "block",
-									marginBottom: "0.4rem",
+									marginBottom: "0.25rem",
 									letterSpacing: "0.025em"
 								}}
 							>
@@ -339,7 +340,7 @@ const Search: React.FC = () => {
 							<input
 								type="datetime-local"
 								className="search-input"
-								style={{ width: "100%", height: "34px", fontSize: "0.85rem" }}
+								style={{ width: "100%", padding: "0.4rem 0.5rem", fontSize: "0.8rem", boxSizing: "border-box" }}
 								value={filters.startTime}
 								onChange={(event) =>
 									setFilters((prev) => ({
@@ -350,7 +351,7 @@ const Search: React.FC = () => {
 							/>
 						</div>
 
-						<div style={{ maxWidth: "300px" }}>
+						<div>
 							<label
 								style={{
 									fontSize: "0.7rem",
@@ -358,7 +359,7 @@ const Search: React.FC = () => {
 									color: "var(--text-secondary)",
 									textTransform: "uppercase",
 									display: "block",
-									marginBottom: "0.4rem",
+									marginBottom: "0.25rem",
 									letterSpacing: "0.025em"
 								}}
 							>
@@ -367,7 +368,7 @@ const Search: React.FC = () => {
 							<input
 								type="datetime-local"
 								className="search-input"
-								style={{ width: "100%", height: "34px", fontSize: "0.85rem" }}
+								style={{ width: "100%", padding: "0.4rem 0.5rem", fontSize: "0.8rem", boxSizing: "border-box" }}
 								value={filters.endTime}
 								onChange={(event) =>
 									setFilters((prev) => ({
@@ -378,7 +379,7 @@ const Search: React.FC = () => {
 							/>
 						</div>
 
-						<div style={{ display: "flex", alignItems: "flex-end", paddingBottom: "6px" }}>
+						<div style={{ display: "flex", alignItems: "flex-end", paddingBottom: "4px" }}>
 							<label
 								style={{
 									display: "flex",
@@ -422,8 +423,8 @@ const Search: React.FC = () => {
 						>
 							Clear
 						</button>
-						<button type="submit" className="btn-primary" disabled={loading}>
-							{loading ? "Searching..." : "Perform Search"}
+						<button type="submit" className="btn-primary" disabled={loading} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+							{loading ? <Loader inline message="Searching" /> : "Perform Search"}
 						</button>
 					</div>
 				</form>
@@ -452,7 +453,7 @@ const Search: React.FC = () => {
 										colSpan={7}
 										style={{ textAlign: "center", padding: "3rem" }}
 									>
-										Loading search results...
+										<Loader message="Filtering malicious traffic" />
 									</td>
 								</tr>
 							) : results.length === 0 ? (
@@ -705,4 +706,4 @@ const Search: React.FC = () => {
 	);
 };
 
-export default Search;
+export default SearchPage;

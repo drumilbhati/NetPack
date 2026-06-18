@@ -49,7 +49,13 @@ export async function apiFetch(
 	}
 
 	const normalizedBase = BASE_URL.replace(/\/$/, "");
-	const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+	let normalizedPath = path.startsWith("/") ? path : `/${path}`;
+	
+	// Ensure /api prefix
+	if (!normalizedPath.startsWith("/api/")) {
+		normalizedPath = `/api${normalizedPath}`;
+	}
+
 	const url = normalizedBase ? `${normalizedBase}${normalizedPath}` : normalizedPath;
 
 	return fetch(url, {

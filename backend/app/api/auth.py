@@ -69,6 +69,17 @@ async def login(payload: LoginRequest) -> TokenResponse:
                 "role": user.role,
             }
         )
+
+        from app.core.audit import log_audit_event
+        log_audit_event(
+            conn,
+            user,
+            action="login",
+            target_type="user",
+            target_id=user.id,
+            metadata={"email": user.email}
+        )
+
         return TokenResponse(access_token=token, user=user)
     finally:
         if conn is not None:

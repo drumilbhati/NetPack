@@ -1,4 +1,5 @@
 import re
+import json
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -70,6 +71,28 @@ async def generate_report(
             )
             evidence_list = [dict(cast(Any, row)) for row in cur.fetchall()]
 
+            cur.execute(
+                """
+                SELECT source, rule_or_model_id, severity, status, title, explanation, flow_reference, created_at
+                FROM alerts
+                WHERE case_id = %s
+                ORDER BY created_at DESC
+                """,
+                (case_id,),
+            )
+            alerts_list = [dict(cast(Any, row)) for row in cur.fetchall()]
+
+        def set_severity_color(pdf, severity: str):
+            sev = severity.lower()
+            if sev == "critical":
+                pdf.set_text_color(185, 28, 28) # Red
+            elif sev == "high":
+                pdf.set_text_color(194, 65, 12) # Orange
+            elif sev == "medium":
+                pdf.set_text_color(180, 130, 0) # Dark Yellow
+            else:
+                pdf.set_text_color(29, 78, 216) # Blue
+
         pdf = ForensicReport()
         pdf.add_page()
 
@@ -97,7 +120,18 @@ async def generate_report(
         )
         pdf.ln(5)
 
+        from app.core.audit import log_audit_event
+        log_audit_event(
+        conn,
+        current_user,
+        action="generate_report",
+        target_type="case",
+        target_id=case_id,
+        case_id=case_id
+        )
+
         pdf.set_font("helvetica", "B", 12)
+
         pdf.cell(0, 10, "Evidence Summary", new_x="LMARGIN", new_y="NEXT")
         if not evidence_list:
             pdf.set_font("helvetica", "I", 10)
@@ -139,6 +173,122 @@ async def generate_report(
                 )
                 pdf.ln(2)
 
+        pdf.ln(2)
+ 
+        # Add Security Alerts & Model Analysis section
+        pdf.add_page()
+        pdf.set_font("helvetica", "B", 12)
+        pdf.cell(0, 10, "Security Alerts & Model Analysis Summary", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
+
+        if not alerts_list:
+            pdf.set_font("helvetica", "I", 10)
+            pdf.cell(
+                0,
+                6,
+                "No security alerts or anomaly detection indicators flagged for this case.",
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+        else:
+            ml_alerts = [a for a in alerts_list if a['source'].upper() == 'ML']
+            sig_alerts = [a for a in alerts_list if a['source'].upper() != 'ML']
+
+            pdf.set_font("helvetica", "B", 10)
+            pdf.cell(0, 6, f"Total Flagged Threats: {len(alerts_list)} (ML Anomalies: {len(ml_alerts)}, Signature Matches: {len(sig_alerts)})", new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(3)
+
+            pdf.set_font("helvetica", "B", 11)
+            pdf.cell(0, 8, "Machine Learning Anomaly Analysis Logs (Latest 15)", new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(1)
+
+            if not ml_alerts:
+                pdf.set_font("helvetica", "I", 9)
+                pdf.cell(0, 6, "No machine learning anomalies detected in this case.", new_x="LMARGIN", new_y="NEXT")
+                pdf.ln(2)
+            else:
+                for idx, a in enumerate(ml_alerts[:15], 1):
+                    pdf.set_font("helvetica", "B", 9)
+                    set_severity_color(pdf, a['severity'])
+                    pdf.multi_cell(0, 5, f"{idx}. Anomaly: {a['title']} ({a['severity'].upper()} Severity)", new_x="LMARGIN", new_y="NEXT")
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.set_font("helvetica", "", 9)
+                    
+                    expl = a['explanation']
+                    if isinstance(expl, str):
+                        try:
+                            expl = json.loads(expl)
+                        except:
+                            pass
+                    
+                    reason = expl.get('reason', '') if isinstance(expl, dict) else str(expl)
+                    confidence = expl.get('confidence', None) if isinstance(expl, dict) else None
+                    score = expl.get('anomaly_score', None) if isinstance(expl, dict) else None
+                    
+                    pdf.multi_cell(0, 4.5, f"   Reason: {reason}", new_x="LMARGIN", new_y="NEXT")
+                    if confidence is not None:
+                        pdf.cell(0, 4.5, f"   Inference Confidence: {float(confidence)*100:.1f}%", new_x="LMARGIN", new_y="NEXT")
+                    if score is not None:
+                        pdf.cell(0, 4.5, f"   ML Decision Score: {score:.5f}", new_x="LMARGIN", new_y="NEXT")
+
+                    flow = a['flow_reference']
+                    if isinstance(flow, str):
+                        try:
+                            flow = json.loads(flow)
+                        except:
+                            pass
+                    if isinstance(flow, dict):
+                        proto = flow.get('protocol') or flow.get('proto') or 'N/A'
+                        src_ip = flow.get('src_ip') or flow.get('srcIp') or 'N/A'
+                        dst_ip = flow.get('dst_ip') or flow.get('dstIp') or 'N/A'
+                        src_port = flow.get('src_port') or flow.get('srcPort') or 'N/A'
+                        dst_port = flow.get('dst_port') or flow.get('dstPort') or 'N/A'
+                        pdf.cell(0, 4.5, f"   Flow: {src_ip}:{src_port} -> {dst_ip}:{dst_port} ({proto})", new_x="LMARGIN", new_y="NEXT")
+                    
+                    pdf.ln(2)
+
+            pdf.ln(4)
+            pdf.set_font("helvetica", "B", 11)
+            pdf.cell(0, 8, "Signature Rules Engine Match Logs (Latest 15)", new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(1)
+
+            if not sig_alerts:
+                pdf.set_font("helvetica", "I", 9)
+                pdf.cell(0, 6, "No signature matches detected in this case.", new_x="LMARGIN", new_y="NEXT")
+                pdf.ln(2)
+            else:
+                for idx, a in enumerate(sig_alerts[:15], 1):
+                    pdf.set_font("helvetica", "B", 9)
+                    set_severity_color(pdf, a['severity'])
+                    pdf.multi_cell(0, 5, f"{idx}. Alert: {a['title']} ({a['severity'].upper()} Severity) [{a['rule_or_model_id']}]", new_x="LMARGIN", new_y="NEXT")
+                    pdf.set_text_color(0, 0, 0)
+                    pdf.set_font("helvetica", "", 9)
+                    
+                    expl = a['explanation']
+                    if isinstance(expl, str):
+                        try:
+                            expl = json.loads(expl)
+                        except:
+                            pass
+                    reason = expl.get('reason', '') if isinstance(expl, dict) else str(expl)
+                    
+                    pdf.multi_cell(0, 4.5, f"   Reason: {reason}", new_x="LMARGIN", new_y="NEXT")
+                    flow = a['flow_reference']
+                    if isinstance(flow, str):
+                        try:
+                            flow = json.loads(flow)
+                        except:
+                            pass
+                    if isinstance(flow, dict):
+                        proto = flow.get('protocol') or flow.get('proto') or 'N/A'
+                        src_ip = flow.get('src_ip') or flow.get('srcIp') or 'N/A'
+                        dst_ip = flow.get('dst_ip') or flow.get('dstIp') or 'N/A'
+                        src_port = flow.get('src_port') or flow.get('srcPort') or 'N/A'
+                        dst_port = flow.get('dst_port') or flow.get('dstPort') or 'N/A'
+                        pdf.cell(0, 4.5, f"   Flow: {src_ip}:{src_port} -> {dst_ip}:{dst_port} ({proto})", new_x="LMARGIN", new_y="NEXT")
+                    
+                    pdf.ln(2)
+
         pdf.ln(10)
         pdf.set_font("helvetica", "B", 10)
         pdf.cell(0, 6, "Certification:", new_x="LMARGIN", new_y="NEXT")
@@ -147,6 +297,8 @@ async def generate_report(
             0,
             5,
             "I hereby certify that this report is a true and accurate representation of the digital evidence analyzed by the NetPack platform. The integrity of the original evidence has been maintained via cryptographic hashing.",
+            new_x="LMARGIN",
+            new_y="NEXT",
         )
 
         pdf_output = pdf.output()

@@ -4,3 +4,4 @@ psycopg2-binary==2.9.12
 pandas==3.0.3
 scikit-learn==1.9.0
 joblib==1.5.3
+confluent-kafka==2.5.0

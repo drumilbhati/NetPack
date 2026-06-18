@@ -1,4 +1,5 @@
 import uuid
+import json
 from datetime import datetime, timezone
 from typing import Any, List, cast
 
@@ -54,6 +55,18 @@ async def create_case(
                 """,
                 (case_id, current_user.id, "owner"),
             )
+            
+            from app.core.audit import log_audit_event
+            log_audit_event(
+                conn,
+                current_user,
+                action="create",
+                target_type="case",
+                target_id=case_id,
+                case_id=case_id,
+                metadata={"title": case_in.title}
+            )
+
             conn.commit()
             return new_case
     except Exception as e:
@@ -67,6 +80,8 @@ async def create_case(
 
 @router.get("/", response_model=List[Case])
 async def list_cases(
+    limit: int = 50,
+    offset: int = 0,
     current_user: UserContext = Depends(
         require_role("admin", "investigator", "auditor")
     ),
@@ -75,16 +90,22 @@ async def list_cases(
     try:
         conn = get_db_conn()
         with conn.cursor() as cur:
-            accessible_case_ids = get_accessible_case_ids(conn, current_user)
-            if accessible_case_ids is None:
-                cur.execute("SELECT * FROM cases ORDER BY created_at DESC")
-            elif not accessible_case_ids:
-                return []
-            else:
-                placeholders = ",".join(["%s"] * len(accessible_case_ids))
+            if current_user.role in ("admin", "auditor"):
                 cur.execute(
-                    f"SELECT * FROM cases WHERE id IN ({placeholders}) ORDER BY created_at DESC",
-                    tuple(accessible_case_ids),
+                    "SELECT * FROM cases ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                    (limit, offset)
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT DISTINCT c.*
+                    FROM cases c
+                    LEFT JOIN case_members cm ON cm.case_id = c.id
+                    WHERE c.created_by = %s OR cm.user_id = %s
+                    ORDER BY c.created_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (current_user.id, current_user.id, limit, offset),
                 )
             return [dict(case_row) for case_row in cur.fetchall()]
     except Exception as e:
@@ -93,6 +114,62 @@ async def list_cases(
         if conn is not None:
             conn.close()
 
+
+@router.patch("/{case_id}/close", response_model=Case)
+async def close_case(
+    case_id: str,
+    current_user: UserContext = Depends(require_role("admin", "investigator")),
+):
+    conn = None
+    try:
+        conn = get_db_conn()
+        with conn.cursor() as cur:
+            require_case_access(conn, current_user, case_id, write=True)
+
+            cur.execute(
+                """
+                UPDATE cases 
+                SET status = 'closed', updated_at = NOW() 
+                WHERE id = %s AND status != 'closed'
+                RETURNING *
+                """,
+                (case_id,),
+            )
+            updated_case = cast(Any, cur.fetchone())
+            
+            if not updated_case:
+                # If not returned, it either doesn't exist or is already closed. Let's check which.
+                cur.execute("SELECT status FROM cases WHERE id = %s", (case_id,))
+                status_row = cur.fetchone()
+                if not status_row:
+                    raise HTTPException(status_code=404, detail="Case not found")
+                if status_row["status"] == 'closed':
+                    raise HTTPException(status_code=400, detail="Case is already closed")
+                
+            updated_case = dict(updated_case)
+
+            from app.core.audit import log_audit_event
+            log_audit_event(
+                conn,
+                current_user,
+                action="close_case",
+                target_type="case",
+                target_id=case_id,
+                case_id=case_id,
+                metadata={"previous_status": "open"}
+            )
+
+            conn.commit()
+            return updated_case
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if conn is not None:
+            conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn is not None:
+            conn.close()
 
 @router.get("/{case_id}/details")
 async def get_case_details(
@@ -146,7 +223,47 @@ async def get_case_details(
             for log in custody_logs:
                 log["occurred_at"] = log["occurred_at"].isoformat()
 
-            return {"case": case, "evidence": evidence, "custody_logs": custody_logs}
+            # 4. Fetch Security Alerts / Risks
+            cur.execute(
+                """
+                SELECT id, evidence_id, source, rule_or_model_id, severity, status, title, explanation, flow_reference, created_at
+                FROM alerts
+                WHERE case_id = %s
+                ORDER BY created_at DESC
+                LIMIT 100
+                """,
+                (case_id,),
+            )
+            alerts = [dict(cast(Any, row)) for row in cur.fetchall()]
+            for a in alerts:
+                a["created_at"] = a["created_at"].isoformat()
+                if isinstance(a["flow_reference"], str):
+                    try:
+                        a["flow_reference"] = json.loads(a["flow_reference"])
+                    except:
+                        pass
+                if isinstance(a["explanation"], str):
+                    try:
+                        a["explanation"] = json.loads(a["explanation"])
+                    except:
+                        pass
+
+            from app.core.audit import log_audit_event
+            log_audit_event(
+                conn,
+                current_user,
+                action="view",
+                target_type="case",
+                target_id=case_id,
+                case_id=case_id
+            )
+
+            return {
+                "case": case,
+                "evidence": evidence,
+                "custody_logs": custody_logs,
+                "alerts": alerts
+            }
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e

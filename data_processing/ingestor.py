@@ -198,76 +198,29 @@ class EvidenceIngestor:
                     conn.commit()
                     print(f"Successfully ingested {filename} as {evidence_id}")
 
-                    # 5. DPI and Indexing
+                    # 5. Offload DPI and Analysis to Kafka
                     try:
-                        print(f"Running DPI and Anomaly Detection for {filename}...")
-
-                        from scapy.all import rdpcap
-
-                        packets = rdpcap(str(file_path))
-
-                        # Extract both packets (for protocol details) and flows (for ML)
-                        packet_records = extract_packet_metadata(packets)
-                        flow_records = extract_flow_metadata(packets)
-
-                        # Use the same normalization logic as index_metadata.py
-                        from .index_metadata import normalize_record
-
-                        context = {
+                        from .kafka_utils import get_kafka_producer, produce_message
+                        
+                        producer = get_kafka_producer()
+                        job_payload = {
+                            "type": "pcap_analysis",
                             "case_id": case_id,
                             "evidence_id": evidence_id,
+                            "object_key": object_key,
+                            "filename": filename,
                             "sha256": sha256,
+                            "uploaded_by": uploaded_by
                         }
+                        
+                        print(f"Queuing parser job for {filename}...")
+                        produce_message(producer, "parser-jobs", evidence_id, job_payload)
+                        print(f"Job queued successfully for {evidence_id}")
 
-                        # 1. Process Packets (DPI)
-                        p_records = [
-                            normalize_record(rec, context) for rec in packet_records
-                        ]
-
-                        # 2. Process Flows and Score Anomalies
-                        if ML_READY and flow_records:
-                            df = pd.DataFrame(flow_records)
-                            # Predict anomalies
-                            scores = ANOMALY_DETECTOR.score(df)
-                            preds = ANOMALY_DETECTOR.predict(df)
-
-                            for i, rec in enumerate(flow_records):
-                                rec["anomaly_score"] = float(scores[i])
-                                rec["is_anomaly"] = bool(preds[i] == -1)
-
-                        f_records = [
-                            normalize_record(rec, context) for rec in flow_records
-                        ]
-
-                        all_records = p_records + f_records
-
-                        if all_records:
-                            print(
-                                f"Indexing {len(all_records)} records into Elasticsearch..."
-                            )
-                            index_records(all_records, self.es_url, self.es_index)
-                            print(
-                                f"Successfully indexed metadata and anomalies for {filename}"
-                            )
-
-                            # 3. Process and Store Alerts
-                            try:
-                                self.threat_service.process_evidence(
-                                    case_id, evidence_id, p_records, f_records
-                                )
-                            except Exception as alert_exc:
-                                print(f"Warning: Alert generation failed: {alert_exc}")
-
-                        else:
-                            print(f"No packets or flows found in {filename} to index.")
-                    except Exception as e:
-                        print(
-                            f"DPI/Indexing/ML failed for {filename}: {e}",
-                            file=sys.stderr,
-                        )
-                        import traceback
-
-                        traceback.print_exc()
+                    except Exception as kafka_exc:
+                        print(f"Warning: Failed to queue Kafka job: {kafka_exc}")
+                        # Fallback: We could run it synchronously here if Kafka is down, 
+                        # but for now let's just log it. The evidence is safely in MinIO.
 
                     return evidence_id
 

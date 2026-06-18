@@ -1,16 +1,17 @@
 import argparse
+import base64
 import os
 import sys
 import time
 from pathlib import Path
 from typing import Optional
 
-from scapy.all import sniff, wrpcap
+from scapy.all import sniff
 
 # Add parent directory to sys.path to allow relative imports
 sys.path.append(str(Path(__file__).parent.parent))
 
-from data_processing.ingestor import EvidenceIngestor
+from data_processing.kafka_utils import get_kafka_producer, produce_message
 
 
 class LiveCaptureService:
@@ -18,52 +19,49 @@ class LiveCaptureService:
         self,
         interface: str,
         case_id: str,
-        interval: int = 60,
+        batch_size: int = 100,
         user_id: Optional[str] = None,
     ):
         self.interface = interface
         self.case_id = case_id
-        self.interval = interval
+        self.batch_size = batch_size
         self.user_id = user_id
-        self.ingestor = EvidenceIngestor()
         self.packet_buffer = []
-        self.last_flush = time.time()
         self.is_running = False
+        self.producer = get_kafka_producer()
 
     def packet_handler(self, packet):
-        self.packet_buffer.append(packet)
-        current_time = time.time()
+        # Serialize packet to raw bytes and then base64 for JSON compatibility
+        raw_pkt = bytes(packet)
+        pkt_data = {
+            "case_id": self.case_id,
+            "interface": self.interface,
+            "user_id": self.user_id,
+            "timestamp": float(packet.time),
+            "data": base64.b64encode(raw_pkt).decode("utf-8"),
+        }
+        
+        self.packet_buffer.append(pkt_data)
 
-        if current_time - self.last_flush >= self.interval:
-            self.flush_to_ingestor()
-            self.last_flush = current_time
+        if len(self.packet_buffer) >= self.batch_size:
+            self.flush_to_kafka()
 
-    def flush_to_ingestor(self):
+    def flush_to_kafka(self):
         if not self.packet_buffer:
             return
 
-        print(f"[*] Flushing {len(self.packet_buffer)} packets to ingestor...")
-
-        temp_dir = Path("temp_captures")
-        temp_dir.mkdir(exist_ok=True)
-
-        timestamp = int(time.time())
-        filename = f"live_{self.interface.replace('/', '_')}_{timestamp}.pcap"
-        file_path = temp_dir / filename
+        print(f"[*] Streaming {len(self.packet_buffer)} packets to Kafka topic 'raw-capture-chunks'...")
 
         try:
-            # Save packets to temporary PCAP
-            wrpcap(str(file_path), self.packet_buffer)
+            payload = {
+                "case_id": self.case_id,
+                "user_id": self.user_id,
+                "packets": self.packet_buffer
+            }
+            produce_message(self.producer, "raw-capture-chunks", self.case_id, payload)
             self.packet_buffer = []
-
-            # Ingest into the main pipeline
-            evidence_id = self.ingestor.ingest(self.case_id, file_path, self.user_id)
-            print(f"[+] Successfully ingested live capture chunk as {evidence_id}")
         except Exception as e:
-            print(f"[-] Error during live capture ingestion: {e}")
-        finally:
-            if file_path.exists():
-                file_path.unlink()
+            print(f"[-] Error streaming to Kafka: {e}")
 
     def start(self, count: int = 0):
         """
@@ -71,9 +69,9 @@ class LiveCaptureService:
         count=0 means sniff indefinitely.
         """
         self.is_running = True
-        print(f"[*] Starting live capture on interface: {self.interface}")
+        print(f"[*] Starting LIVE STREAMING capture on interface: {self.interface}")
         print(f"[*] Target Case ID: {self.case_id}")
-        print(f"[*] Rotation Interval: {self.interval} seconds")
+        print(f"[*] Batch Size: {self.batch_size} packets")
         
         try:
             sniff(
@@ -90,20 +88,20 @@ class LiveCaptureService:
             self.is_running = False
             # Final flush
             if self.packet_buffer:
-                self.flush_to_ingestor()
+                self.flush_to_kafka()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Live network interface capture for NetPack.")
     parser.add_argument("--interface", "-i", required=True, help="Network interface to sniff (e.g., eth0, en0)")
     parser.add_argument("--case-id", "-c", required=True, help="Case UUID to associate with the capture")
-    parser.add_argument("--interval", "-t", type=int, default=60, help="Rotation interval in seconds (default: 60)")
+    parser.add_argument("--batch-size", "-b", type=int, default=100, help="Number of packets to batch before sending to Kafka")
     parser.add_argument("--user-id", "-u", help="User UUID performing the capture")
     parser.add_argument("--count", type=int, default=0, help="Number of packets to capture (0 for infinite)")
 
     args = parser.parse_args()
 
-    # Load environment variables for ingestor
+    # Load environment variables
     try:
         from dotenv import load_dotenv
         env_path = Path(__file__).parent.parent / "infra" / ".env"
@@ -115,7 +113,7 @@ if __name__ == "__main__":
     service = LiveCaptureService(
         interface=args.interface,
         case_id=args.case_id,
-        interval=args.interval,
+        batch_size=args.batch_size,
         user_id=args.user_id
     )
     

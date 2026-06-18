@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from app.core.database import get_db_conn
 from app.dependencies.auth import (
     get_accessible_case_ids,
+    get_filtered_case_ids,
     require_case_access,
     require_role,
 )
@@ -29,9 +30,14 @@ async def get_timeline(
 ):
     timeline_events: List[Dict[str, Any]] = []
     conn = None
+    filtered_case_ids = None
     try:
         conn = get_db_conn()
-        accessible_case_ids = get_accessible_case_ids(conn, current_user)
+        
+        # Prefetch filtered case IDs for ES while connection is open
+        if not case_id:
+            filtered_case_ids = await get_filtered_case_ids(conn, current_user, es_service)
+            
         with conn.cursor() as cur:
             if case_id:
                 require_case_access(conn, current_user, case_id)
@@ -46,8 +52,7 @@ async def get_timeline(
                     """,
                     (case_id,),
                 )
-                evidence_events = [dict(cast(Any, row)) for row in cur.fetchall()]
-            elif accessible_case_ids is None:
+            elif current_user.role in ("admin", "auditor"):
                 cur.execute(
                     """
                     SELECT id, original_filename AS title, uploaded_at AS timestamp,
@@ -57,23 +62,24 @@ async def get_timeline(
                     LIMIT 50
                     """
                 )
-                evidence_events = [dict(cast(Any, row)) for row in cur.fetchall()]
-            elif not accessible_case_ids:
-                evidence_events = []
             else:
-                placeholders = ",".join(["%s"] * len(accessible_case_ids))
                 cur.execute(
-                    f"""
+                    """
                     SELECT id, original_filename AS title, uploaded_at AS timestamp,
                            'evidence' AS type
                     FROM evidence_files
-                    WHERE case_id IN ({placeholders})
+                    WHERE case_id IN (
+                        SELECT DISTINCT c.id
+                        FROM cases c
+                        LEFT JOIN case_members cm ON cm.case_id = c.id
+                        WHERE c.created_by = %s OR cm.user_id = %s
+                    )
                     ORDER BY uploaded_at DESC
                     LIMIT 50
                     """,
-                    tuple(accessible_case_ids),
+                    (current_user.id, current_user.id),
                 )
-                evidence_events = [dict(cast(Any, row)) for row in cur.fetchall()]
+            evidence_events = [dict(cast(Any, row)) for row in cur.fetchall()]
 
             for event in evidence_events:
                 event["timestamp"] = _format_timestamp(event["timestamp"])
@@ -91,8 +97,7 @@ async def get_timeline(
                     """,
                     (case_id,),
                 )
-                alert_events = [dict(cast(Any, row)) for row in cur.fetchall()]
-            elif accessible_case_ids is None:
+            elif current_user.role in ("admin", "auditor"):
                 cur.execute(
                     """
                     SELECT id, title, created_at AS timestamp, severity, source, explanation, flow_reference,
@@ -102,23 +107,24 @@ async def get_timeline(
                     LIMIT 50
                     """
                 )
-                alert_events = [dict(cast(Any, row)) for row in cur.fetchall()]
-            elif not accessible_case_ids:
-                alert_events = []
             else:
-                placeholders = ",".join(["%s"] * len(accessible_case_ids))
                 cur.execute(
-                    f"""
+                    """
                     SELECT id, title, created_at AS timestamp, severity, source, explanation, flow_reference,
                            'alert' AS type
                     FROM alerts
-                    WHERE case_id IN ({placeholders})
+                    WHERE case_id IN (
+                        SELECT DISTINCT c.id
+                        FROM cases c
+                        LEFT JOIN case_members cm ON cm.case_id = c.id
+                        WHERE c.created_by = %s OR cm.user_id = %s
+                    )
                     ORDER BY created_at DESC
                     LIMIT 50
                     """,
-                    tuple(accessible_case_ids),
+                    (current_user.id, current_user.id),
                 )
-                alert_events = [dict(cast(Any, row)) for row in cur.fetchall()]
+            alert_events = [dict(cast(Any, row)) for row in cur.fetchall()]
 
             for event in alert_events:
                 event["timestamp"] = _format_timestamp(event["timestamp"])
@@ -130,7 +136,7 @@ async def get_timeline(
     try:
         sessions = await es_service.get_recent_sessions(
             case_id=case_id,
-            case_ids=None if case_id else accessible_case_ids,
+            case_ids=filtered_case_ids,
             size=50,
         )
         for session in sessions:

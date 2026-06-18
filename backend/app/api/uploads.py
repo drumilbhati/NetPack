@@ -4,7 +4,7 @@ import logging
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, BackgroundTasks
 from fastapi.concurrency import run_in_threadpool
 
 from app.core.database import get_db_conn
@@ -13,6 +13,44 @@ from app.schemas.auth import UserContext
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def run_background_analysis(
+    case_id: str,
+    evidence_id: str,
+    file_path: str,
+    filename: str,
+    sha256: str,
+    uploaded_by: str
+):
+    import sys
+    from unittest.mock import MagicMock
+
+    # Mock confluent_kafka if not present
+    if "confluent_kafka" not in sys.modules:
+        sys.modules["confluent_kafka"] = MagicMock()
+
+    # Add project root to sys.path
+    project_root = str(Path(__file__).resolve().parents[3])
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+
+    try:
+        from data_processing.worker import ParserWorker
+        worker = ParserWorker()
+        job = {
+            "case_id": case_id,
+            "evidence_id": evidence_id,
+            "object_key": file_path,
+            "filename": filename,
+            "sha256": sha256,
+            "uploaded_by": uploaded_by
+        }
+        worker.process_job(job)
+        logger.info(f"Background analysis completed successfully for {filename}")
+    except Exception as e:
+        logger.error(f"Background analysis failed for {filename}: {e}", exc_info=True)
+
 
 # Define and resolve the upload directory
 UPLOAD_DIR = Path("uploads").resolve()
@@ -57,10 +95,12 @@ def save_file_sync(source_file, target_path: Path):
 @router.post("/{case_id}")
 async def upload_pcap(
     case_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_user: UserContext = Depends(require_role("admin", "investigator")),
 ):
     conn = None
+    file_path = None
     try:
         conn = get_db_conn()
         require_case_access(conn, current_user, case_id, write=True)
@@ -110,7 +150,7 @@ async def upload_pcap(
         try:
             size, sha256 = await run_in_threadpool(save_file_sync, file.file, file_path)
         except SizeLimitExceeded:
-            if file_path.exists():
+            if file_path and file_path.exists():
                 try:
                     file_path.unlink()
                 except Exception:
@@ -120,7 +160,7 @@ async def upload_pcap(
                 detail="File size exceeds the maximum limit of 100 MB.",
             ) from None
         except Exception as e:
-            if file_path.exists():
+            if file_path and file_path.exists():
                 try:
                     file_path.unlink()
                 except Exception:
@@ -139,7 +179,7 @@ async def upload_pcap(
                     (case_id, sha256),
                 )
                 if cur.fetchone():
-                    if file_path.exists():
+                    if file_path and file_path.exists():
                         file_path.unlink()
                     raise HTTPException(
                         status_code=409,
@@ -161,7 +201,7 @@ async def upload_pcap(
                         current_user.id,
                     ),
                 )
-                evidence_id = cur.fetchone()[0]
+                evidence_id = cur.fetchone()["id"]
 
                 # Log custody event
                 cur.execute(
@@ -176,7 +216,55 @@ async def upload_pcap(
                         json.dumps({"filename": sanitized_name}),
                     ),
                 )
+
+                from app.core.audit import log_audit_event
+                log_audit_event(
+                    conn,
+                    current_user,
+                    action="upload",
+                    target_type="evidence",
+                    target_id=str(evidence_id),
+                    case_id=case_id,
+                    evidence_id=str(evidence_id),
+                    metadata={"filename": sanitized_name, "size": size}
+                )
+
                 conn.commit()
+                
+            # 6. Offload DPI and Analysis
+            try:
+                import sys
+                project_root = str(Path(__file__).resolve().parents[3])
+                if project_root not in sys.path:
+                    sys.path.append(project_root)
+                from data_processing.kafka_utils import get_kafka_producer, produce_message
+                
+                producer = get_kafka_producer()
+                job_payload = {
+                    "type": "pcap_analysis",
+                    "case_id": case_id,
+                    "evidence_id": str(evidence_id),
+                    "object_key": str(file_path),
+                    "filename": sanitized_name,
+                    "sha256": sha256,
+                    "uploaded_by": current_user.id
+                }
+                
+                logger.info(f"Queuing parser job for {sanitized_name}...")
+                produce_message(producer, "parser-jobs", str(evidence_id), job_payload)
+            except Exception as kafka_exc:
+                logger.warning(f"Failed to queue Kafka job: {kafka_exc}")
+
+            # Queue local synchronous fallback analysis
+            background_tasks.add_task(
+                run_background_analysis,
+                case_id,
+                str(evidence_id),
+                str(file_path),
+                sanitized_name,
+                sha256,
+                current_user.id
+            )
 
             return {
                 "id": str(evidence_id),
@@ -188,8 +276,10 @@ async def upload_pcap(
         except HTTPException:
             raise
         except Exception as e:
-            conn.rollback()
-            if file_path.exists():
+            logger.exception("Upload failed with unexpected exception")
+            if conn is not None:
+                conn.rollback()
+            if file_path and file_path.exists():
                 file_path.unlink()
             raise HTTPException(
                 status_code=500, detail=f"Database error: {str(e)}"

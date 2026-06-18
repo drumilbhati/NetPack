@@ -1,35 +1,75 @@
 import datetime
+import json
+import math
+import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
 
-from scapy.all import DNS, DNSQR, IP, TCP, UDP, Raw, rdpcap
+from scapy.all import DNS, DNSQR, ICMP, IP, TCP, UDP, PcapReader, Raw
 from scapy.layers.http import HTTPRequest
 
 from .tcp_reassembler import TCPReassembler
 
-# Payload Signatures for sensitive data and common attack patterns
-PAYLOAD_SIGNATURES = {
-    "password_exposure": re.compile(
-        rb"(password|passwd|pwd|secret)\s*[:=]\s*(\w+)", re.IGNORECASE
-    ),
-    "sql_injection_attempt": re.compile(
-        rb"union\s+select|drop\s+table|select\s+.*\s+from\s+information_schema",
-        re.IGNORECASE,
-    ),
-    "private_key_exposure": re.compile(
-        rb"-----BEGIN (RSA|EC|DSA|OPENSSH)? PRIVATE KEY-----"
-    ),
-    "zip_archive_header": re.compile(rb"PK\x03\x04"),
-    "executable_header": re.compile(rb"MZ\x90\x00"),  # Windows PE
-    "elf_header": re.compile(rb"\x7fELF"),
-}
 
-
-def extract_packet_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
+class SignatureManager:
     """
-    Extract metadata from Scapy packets.
-    Decodes HTTP, DNS, FTP, SMTP, SMB and matches payload signatures.
+    Manages loading and matching of payload signatures from external JSON rules.
+    """
+
+    def __init__(self, rules_path: Optional[str] = None):
+        self.signatures: List[Dict[str, Any]] = []
+        if rules_path is None:
+            rules_path = os.path.join(
+                os.path.dirname(__file__), "rules", "signatures.json"
+            )
+
+        self.load_rules(rules_path)
+
+    def load_rules(self, path: str):
+        if not os.path.exists(path):
+            print(f"Warning: Signature rules file not found at {path}")
+            return
+
+        try:
+            with open(path, "r") as f:
+                rules = json.load(f)
+                for rule in rules:
+                    rule["regex"] = re.compile(rule["pattern"].encode(), re.IGNORECASE)
+                    self.signatures.append(rule)
+            print(f"Loaded {len(self.signatures)} payload signatures from {path}")
+        except Exception as e:
+            print(f"Error loading signatures from {path}: {e}")
+
+    def match(self, payload: bytes) -> List[str]:
+        matched = []
+        for sig in self.signatures:
+            if sig["regex"].search(payload):
+                matched.append(sig["name"])
+        return matched
+
+
+def calculate_entropy(data: str) -> float:
+    """
+    Calculate Shannon entropy of a string (used for DNS tunneling detection).
+    """
+    if not data:
+        return 0.0
+    entropy = 0
+    for x in range(256):
+        p_x = float(data.count(chr(x))) / len(data)
+        if p_x > 0:
+            entropy += -p_x * math.log(p_x, 2)
+    return entropy
+
+
+SIGNATURE_MANAGER = SignatureManager()
+
+
+def extract_packet_metadata(packets: Iterable[Any]) -> List[Dict[str, Any]]:
+    """
+    Extract metadata from Scapy packets (iterator-based).
+    Decodes HTTP, DNS, FTP, SMTP, SMB, ICMP and matches payload signatures.
     """
     results = []
 
@@ -113,10 +153,7 @@ def extract_packet_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
             # Payload Signature Matching
             if Raw in pkt:
                 payload_data = pkt[Raw].load
-                matched = []
-                for sig_name, pattern in PAYLOAD_SIGNATURES.items():
-                    if pattern.search(payload_data):
-                        matched.append(sig_name)
+                matched = SIGNATURE_MANAGER.match(payload_data)
                 if matched:
                     res["payload_signatures"] = matched
 
@@ -133,17 +170,31 @@ def extract_packet_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
                     if pkt[DNSQR].qname
                     else ""
                 )
-                res["dns_query"] = qname.lower().rstrip(".")
+                query = qname.lower().rstrip(".")
+                res["dns_query"] = query
+                res["dns_entropy"] = calculate_entropy(query)
                 res["protocol"] = "DNS"
+
+        # 3. ICMP Analysis (Tunneling Detection)
+        elif ICMP in pkt:
+            res["protocol"] = "ICMP"
+            res["icmp_type"] = pkt[ICMP].type
+            res["icmp_code"] = pkt[ICMP].code
+            if Raw in pkt:
+                payload_data = pkt[Raw].load
+                res["payload_size"] = len(payload_data)
+                # Check for large ICMP payloads (often indicative of tunneling)
+                if len(payload_data) > 64:
+                    res["suspicious_icmp"] = True
 
         results.append(res)
 
     return results
 
 
-def extract_flow_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
+def extract_flow_metadata(packets: Iterable[Any]) -> List[Dict[str, Any]]:
     """
-    Extract flow-level metadata from Scapy packets.
+    Extract flow-level metadata from Scapy packets (iterator-based).
     Aggregates packets into flows based on (src_ip, dst_ip, sport, dport, protocol).
     """
     flows = {}
@@ -167,6 +218,8 @@ def extract_flow_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
             proto = "UDP"
             sport = pkt[UDP].sport
             dport = pkt[UDP].dport
+        elif ICMP in pkt:
+            proto = "ICMP"
 
         # Canonical flow key (directional)
         flow_key = (src_ip, dst_ip, sport, dport, proto)
@@ -214,7 +267,14 @@ def extract_flow_metadata(packets: List[Any]) -> List[Dict[str, Any]]:
     return results
 
 
-def extract_tcp_streams(packets: List[Any]) -> Dict[str, Any]:
+def process_pcap_iterator(file_path: str) -> Iterable[Any]:
+    """
+    Returns a PcapReader iterator for a given PCAP file.
+    """
+    return PcapReader(file_path)
+
+
+def extract_tcp_streams(packets: Iterable[Any]) -> Dict[str, Any]:
     """
     Reassemble TCP streams from packets and return as a dictionary.
     Keys are string representations of the 5-tuple.
